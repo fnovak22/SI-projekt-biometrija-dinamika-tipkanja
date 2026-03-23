@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <title>Registracija</title>
+</head>
+<body>
+    <h2>Registracija</h2>
+    <form method="POST">
+        {{ form.hidden_tag() }}
+        {{ form.username.label }} {{ form.username(size=30) }}<br>
+        {{ form.password.label }} {{ form.password(size=30) }}<br>
+        {{ form.confirm_password.label }} {{ form.confirm_password(size=30) }}<br>
+        <input type="submit" value="Registriraj se">
+    </form>
+    <p><a href="{{ url_for('login') }}">Prijava</a></p>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul>
+        {% for category, msg in messages %}
+          <li><strong>{{ category }}</strong>: {{ msg }}</li>
+        {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+</body>
+</html>
