@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Početna | KeyStroke ID{% endblock %}
+{% block content %}
+<section class="dashboard">
+    <div class="card welcome-card">
+        <p class="eyebrow">Dobrodošao/la</p>
+        <h1>Bok, {{ username }}</h1>
+        <p class="lead">Enrollment je završen. Možeš prikupljati dodatne uzorke ili izvesti CSV koji tim za model koristi za feature engineering i SVM.</p>
+        <div class="actions">
+            <a class="button" href="{{ url_for('collect') }}">Prikupi dodatni uzorak</a>
+            <a class="button secondary" href="{{ url_for('samples') }}">Pogledaj uzorke</a>
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat card"><span>Tvoji uzorci</span><strong>{{ sample_count }}</strong></div>
+        <div class="stat card"><span>Enrollment</span><strong>{{ enrollment_count }}/{{ required_enrollment_samples }}</strong></div>
+        <div class="stat card"><span>Ukupno uzoraka</span><strong>{{ total_samples }}</strong></div>
+    </div>
+
+    <div class="card two-column">
+        <div>
+            <h2>Fraze za model</h2>
+            <p class="muted">Registracija koristi 5 fiksnih fraza ponovljenih 4 puta. To je bolji kompromis od 20 potpuno različitih rečenica jer SVM može uspoređivati uzorke po istom <code>prompt_id</code>.</p>
+            <div class="prompt-list-preview">
+                {% for prompt in prompts %}
+                    <div><strong>{{ prompt.id }}</strong><span>{{ prompt.text }}</span></div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="checklist">
+            <h2>Za ML tim</h2>
+            <ul>
+                <li>koristiti samo <code>sample_type=enroll</code> za početni trening</li>
+                <li>grupirati uzorke po <code>username</code> i <code>prompt_id</code></li>
+                <li><code>verify_attempt</code> su pokušaji iz drugog koraka prijave</li>
+            </ul>
+            <a class="button secondary full" href="{{ url_for('export_typing_samples_csv') }}">Preuzmi CSV</a>
+        </div>
+    </div>
+</section>
+{% endblock %}

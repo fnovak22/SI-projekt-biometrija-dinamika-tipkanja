@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Dinamika tipkanja{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="topbar">
+            <a class="brand" href="{{ url_for('index') if logged_in_username else url_for('login') }}">
+                <span class="brand-icon">⌨</span>
+                <span>
+                    <strong>KeyStroke ID</strong>
+                    <small>SVM data collection</small>
+                </span>
+            </a>
+
+            <nav class="nav">
+                {% if logged_in_username %}
+                    <a href="{{ url_for('index') }}">Početna</a>
+                    <a href="{{ url_for('collect') }}">Prikupljanje</a>
+                    <a href="{{ url_for('samples') }}">Uzorci <span class="pill">{{ nav_sample_count }}</span></a>
+                    <a class="nav-muted" href="{{ url_for('logout') }}">Odjava</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}">Prijava</a>
+                    <a class="button small" href="{{ url_for('register') }}">Registracija</a>
+                {% endif %}
+            </nav>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <section class="flash-wrap">
+                    {% for category, msg in messages %}
+                        <div class="flash {{ category }}">{{ msg }}</div>
+                    {% endfor %}
+                </section>
+            {% endif %}
+        {% endwith %}
+
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>
