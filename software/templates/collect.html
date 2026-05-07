@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Dodatni uzorci | KeyStroke ID{% endblock %}
+{% block content %}
+<section class="collect-layout">
+    <div class="card collect-card">
+        <p class="eyebrow">Dodatno prikupljanje podataka</p>
+        <h1>Prepiši frazu normalnim tempom</h1>
+        <p class="muted">Ova stranica služi za dodatne uzorke nakon registracije. Obaveznih 20 uzoraka prikuplja se već tijekom registracije.</p>
+
+        <div class="prompt-box" id="promptText"></div>
+
+        <div class="typing-meta">
+            <span>Prompt: <strong id="promptMeta">-</strong></span>
+            <span>Napredak: <strong id="progressText">0/0</strong></span>
+            <span>Status: <strong id="matchText">čeka unos</strong></span>
+        </div>
+
+        <label for="typingBox">Upiši ovdje</label>
+        <textarea id="typingBox" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Klikni ovdje i prepiši frazu..."></textarea>
+
+        <div class="actions">
+            <button class="button" id="saveBtn" type="button">Spremi dodatni uzorak</button>
+            <button class="button secondary" id="resetBtn" type="button">Ponovi</button>
+            <button class="button secondary" id="nextBtn" type="button">Druga fraza</button>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <aside class="card side-card">
+        <h2>Što se sprema?</h2>
+        <ul class="feature-list">
+            <li><strong>keydown / keyup</strong><span>sirovi događaji tipkovnice</span></li>
+            <li><strong>dwell time</strong><span>koliko dugo je tipka držana</span></li>
+            <li><strong>DD interval</strong><span>razmak između keydown događaja</span></li>
+            <li><strong>prompt_id</strong><span>koja je fraza pisana</span></li>
+        </ul>
+        <a class="button secondary full" href="{{ url_for('samples') }}">Vidi spremljene uzorke</a>
+    </aside>
+</section>
+
+<script>
+    const prompts = {{ prompts|tojson }};
+    let currentIndex = 0;
+    let events = [];
+    let startedAt = null;
+
+    const promptText = document.getElementById("promptText");
+    const typingBox = document.getElementById("typingBox");
+    const statusBox = document.getElementById("status");
+    const saveBtn = document.getElementById("saveBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const progressText = document.getElementById("progressText");
+    const promptMeta = document.getElementById("promptMeta");
+    const matchText = document.getElementById("matchText");
+
+    function nowRelative() {
+        const n = performance.now();
+        if (startedAt === null) startedAt = n;
+        return +(n - startedAt).toFixed(3);
+    }
+
+    function currentPrompt() {
+        return prompts[currentIndex];
+    }
+
+    function setStatus(message, type = "") {
+        statusBox.textContent = message;
+        statusBox.className = "status " + type;
+    }
+
+    function updateProgress() {
+        const typed = typingBox.value;
+        const prompt = currentPrompt();
+        progressText.textContent = `${typed.length}/${prompt.text.length}`;
+        promptMeta.textContent = prompt.id;
+
+        if (!typed.length) {
+            matchText.textContent = "čeka unos";
+            matchText.className = "";
+            return;
+        }
+
+        if (prompt.text.startsWith(typed)) {
+            matchText.textContent = typed === prompt.text ? "točno" : "dobro";
+            matchText.className = "good";
+        } else {
+            matchText.textContent = "greška u tekstu";
+            matchText.className = "bad";
+        }
+    }
+
+    function loadText() {
+        const prompt = currentPrompt();
+        promptText.textContent = prompt.text;
+        typingBox.value = "";
+        events = [];
+        startedAt = null;
+        saveBtn.disabled = false;
+        setStatus("Klikni u polje i prepiši frazu.");
+        updateProgress();
+        setTimeout(() => typingBox.focus(), 50);
+    }
+
+    function recordEvent(e) {
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        events.push({
+            type: e.type,
+            key: e.key,
+            code: e.code,
+            t: nowRelative(),
+            repeat: e.repeat,
+            shiftKey: e.shiftKey,
+            inputLength: typingBox.value.length
+        });
+    }
+
+    typingBox.addEventListener("keydown", recordEvent);
+    typingBox.addEventListener("keyup", recordEvent);
+    typingBox.addEventListener("input", updateProgress);
+
+    resetBtn.addEventListener("click", loadText);
+    nextBtn.addEventListener("click", () => {
+        currentIndex = (currentIndex + 1) % prompts.length;
+        loadText();
+    });
+
+    saveBtn.addEventListener("click", async () => {
+        const typed = typingBox.value.trim();
+        const prompt = currentPrompt();
+
+        if (typed !== prompt.text) {
+            setStatus("Tekst se ne poklapa s frazom. Ispravi grešku ili klikni Ponovi.", "bad");
+            return;
+        }
+        if (events.length < 10) {
+            setStatus("Premalo događaja tipkovnice. Nemoj lijepiti tekst, nego ga prepiši ručno.", "bad");
+            return;
+        }
+
+        saveBtn.disabled = true;
+        setStatus("Spremam uzorak...", "info");
+
+        try {
+            const res = await fetch("{{ url_for('api_typing_sample') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sample_type: "extra_enroll",
+                    prompt_id: prompt.id,
+                    prompt_text: prompt.text,
+                    typed_text: typed,
+                    events: events
+                })
+            });
+            const data = await res.json();
+
+            if (!res.ok || !data.ok) {
+                setStatus("Greška kod spremanja uzorka: " + (data.error || "nepoznata greška"), "bad");
+                saveBtn.disabled = false;
+                return;
+            }
+
+            setStatus(`Uzorak #${data.sample_id} spremljen. Dwell avg: ${data.features.avg_dwell_ms} ms, DD avg: ${data.features.avg_dd_interval_ms} ms.`, "good");
+            currentIndex = (currentIndex + 1) % prompts.length;
+            setTimeout(loadText, 850);
+        } catch (err) {
+            setStatus("Greška: server nije odgovorio. Provjeri je li Flask aplikacija pokrenuta.", "bad");
+            saveBtn.disabled = false;
+        }
+    });
+
+    loadText();
+</script>
+{% endblock %}

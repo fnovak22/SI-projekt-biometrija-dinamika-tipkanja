@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Provjera tipkanja | KeyStroke ID{% endblock %}
+{% block content %}
+<section class="collect-layout">
+    <div class="card collect-card">
+        <p class="eyebrow">2. korak prijave za {{ username }}</p>
+        <h1>Prepiši frazu za provjeru identiteta</h1>
+        <p class="muted">Ovo je mjesto gdje će se kasnije pozvati SVM model. Za sada se uzorak sprema kao <code>verify_attempt</code> i propušta korisnika ako je tekst točno prepisan.</p>
+
+        <div class="model-placeholder">
+            <strong>Model status:</strong>
+            <span>placeholder — SVM još nije spojen</span>
+        </div>
+
+        <div class="prompt-box" id="promptText">{{ prompt.text }}</div>
+        <div class="typing-meta">
+            <span>Prompt: <strong>{{ prompt.id }}</strong></span>
+            <span>Status: <strong id="matchText">čeka unos</strong></span>
+        </div>
+
+        <label for="typingBox">Prepiši ovdje</label>
+        <textarea id="typingBox" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Klikni ovdje i prepiši frazu..."></textarea>
+
+        <div class="actions">
+            <button class="button" id="verifyBtn" type="button">Provjeri i prijavi me</button>
+            <button class="button secondary" id="resetBtn" type="button">Ponovi</button>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <aside class="card side-card">
+        <h2>Kasnije za ML tim</h2>
+        <p class="muted">U funkciji <code>verify_typing_with_model_stub</code> u <code>software/app.py</code> treba zamijeniti placeholder stvarnim pozivom SVM modela.</p>
+    </aside>
+</section>
+
+<script>
+    const promptItem = {{ prompt|tojson }};
+    let events = [];
+    let startedAt = null;
+
+    const typingBox = document.getElementById("typingBox");
+    const statusBox = document.getElementById("status");
+    const verifyBtn = document.getElementById("verifyBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const matchText = document.getElementById("matchText");
+
+    function nowRelative() {
+        const n = performance.now();
+        if (startedAt === null) startedAt = n;
+        return +(n - startedAt).toFixed(3);
+    }
+
+    function setStatus(message, type = "") {
+        statusBox.textContent = message;
+        statusBox.className = "status " + type;
+    }
+
+    function updateProgress() {
+        const typed = typingBox.value;
+        if (!typed.length) {
+            matchText.textContent = "čeka unos";
+            matchText.className = "";
+            return;
+        }
+        if (promptItem.text.startsWith(typed)) {
+            matchText.textContent = typed === promptItem.text ? "točno" : `${typed.length}/${promptItem.text.length}`;
+            matchText.className = "good";
+        } else {
+            matchText.textContent = "greška u tekstu";
+            matchText.className = "bad";
+        }
+    }
+
+    function resetTyping() {
+        typingBox.value = "";
+        events = [];
+        startedAt = null;
+        verifyBtn.disabled = false;
+        setStatus("Prepiši frazu za završetak prijave.");
+        updateProgress();
+        setTimeout(() => typingBox.focus(), 50);
+    }
+
+    function recordEvent(e) {
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        events.push({
+            type: e.type,
+            key: e.key,
+            code: e.code,
+            t: nowRelative(),
+            repeat: e.repeat,
+            shiftKey: e.shiftKey,
+            inputLength: typingBox.value.length
+        });
+    }
+
+    typingBox.addEventListener("keydown", recordEvent);
+    typingBox.addEventListener("keyup", recordEvent);
+    typingBox.addEventListener("input", updateProgress);
+    resetBtn.addEventListener("click", resetTyping);
+
+    verifyBtn.addEventListener("click", async () => {
+        const typed = typingBox.value.trim();
+        if (typed !== promptItem.text) {
+            setStatus("Tekst se ne poklapa s frazom.", "bad");
+            return;
+        }
+        if (events.length < 10) {
+            setStatus("Premalo događaja tipkovnice. Prepiši ručno, bez copy/paste.", "bad");
+            return;
+        }
+
+        verifyBtn.disabled = true;
+        setStatus("Spremam pokušaj i pozivam placeholder model...", "info");
+
+        try {
+            const res = await fetch("{{ url_for('api_login_verify') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt_id: promptItem.id,
+                    prompt_text: promptItem.text,
+                    typed_text: typed,
+                    events: events
+                })
+            });
+            const data = await res.json();
+
+            if (!res.ok || !data.ok || !data.accepted) {
+                setStatus("Provjera nije prošla: " + ((data.model && data.model.message) || data.error || "nepoznata greška"), "bad");
+                verifyBtn.disabled = false;
+                return;
+            }
+
+            setStatus("Provjera je prošla. Preusmjeravam na početnu...", "good");
+            window.location.href = data.redirect_url;
+        } catch (err) {
+            setStatus("Greška: server nije odgovorio. Provjeri je li Flask aplikacija pokrenuta.", "bad");
+            verifyBtn.disabled = false;
+        }
+    });
+
+    resetTyping();
+</script>
+{% endblock %}

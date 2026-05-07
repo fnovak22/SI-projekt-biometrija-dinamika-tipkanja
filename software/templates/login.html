@@ -1,26 +1,30 @@
-<!DOCTYPE html>
-<html lang="hr">
-<head>
-    <meta charset="UTF-8">
-    <title>Prijava</title>
-</head>
-<body>
-    <h2>Prijava</h2>
-    <form method="POST">
-        {{ form.hidden_tag() }}
-        {{ form.username.label }} {{ form.username(size=30) }}<br>
-        {{ form.password.label }} {{ form.password(size=30) }}<br>
-        <input type="submit" value="Prijavi se">
+{% extends "base.html" %}
+{% block title %}Prijava | KeyStroke ID{% endblock %}
+{% block content %}
+<section class="auth-layout">
+    <div class="hero-card">
+        <p class="eyebrow">Dvo-korak prijava</p>
+        <h1>Lozinka prvo, dinamika tipkanja odmah nakon toga</h1>
+        <p class="lead">Ako su korisničko ime i lozinka točni, aplikacija traži dodatnu frazu. Trenutno je SVM dio placeholder dok tim ne spoji model.</p>
+        <div class="info-grid">
+            <div><strong>1</strong><span>username + lozinka</span></div>
+            <div><strong>2</strong><span>typing verification</span></div>
+            <div><strong>SVM</strong><span>spaja se kasnije</span></div>
+        </div>
+    </div>
+
+    <form class="card auth-card" method="POST" action="{{ url_for('login') }}">
+        <h2>Prijava</h2>
+        <p class="muted">Nakon točne lozinke slijedi dodatna provjera dinamike tipkanja.</p>
+
+        <label for="username">Korisničko ime</label>
+        <input id="username" name="username" type="text" value="{{ username_value }}" autocomplete="username" required autofocus>
+
+        <label for="password">Lozinka</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+        <button class="button full" type="submit">Nastavi na provjeru tipkanja</button>
+        <p class="center muted">Nemaš račun? <a href="{{ url_for('register') }}">Registriraj se</a></p>
     </form>
-    <p><a href="{{ url_for('register') }}">Registracija</a></p>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <ul>
-        {% for category, msg in messages %}
-          <li><strong>{{ category }}</strong>: {{ msg }}</li>
-        {% endfor %}
-        </ul>
-      {% endif %}
-    {% endwith %}
-</body>
-</html>
+</section>
+{% endblock %}
