@@ -14,6 +14,10 @@ Ova verzija prototipa ima:
 ## Pokretanje
 
 ```bash
+python -m venv venv
+
+(Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned) ; (& C:\SI-projekt-biometrija-dinamika-tipkanja\venv\Scripts\Activate.ps1)
+
 pip install -r requirements.txt
 python software/app.py
 ```
