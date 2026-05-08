@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Research admin | {{ app_name }}{% endblock %}
+{% block content %}
+<section class="dashboard">
+    <div class="card welcome-card">
+        <p class="eyebrow">ML istraživanje</p>
+        <h1>Research admin dashboard</h1>
+        <p class="lead">Pregled korisnika, bilješki i uzoraka tipkanja za demonstraciju profesoru i izvoz podataka za model.</p>
+        <div class="actions">
+            <a class="button" href="{{ url_for('export_typing_samples_csv') }}">Preuzmi CSV svih uzoraka</a>
+            <a class="button secondary" href="{{ url_for('index') }}">Natrag na bilješke</a>
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat card"><span>Korisnici</span><strong>{{ total_users }}</strong></div>
+        <div class="stat card"><span>Bilješke</span><strong>{{ total_notes }}</strong></div>
+        <div class="stat card"><span>Uzorci tipkanja</span><strong>{{ total_samples }}</strong></div>
+    </div>
+
+    <section class="card">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Korisnici</p>
+                <h2>Enrollment i uzorci po korisniku</h2>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Korisnik</th>
+                        <th>Rola</th>
+                        <th>Bilješke</th>
+                        <th>Enrollment</th>
+                        <th>Login pokušaji</th>
+                        <th>Free-text</th>
+                        <th>Ukupno</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in user_rows %}
+                        <tr>
+                            <td>{{ row.user.username }}</td>
+                            <td><span class="sample-chip">{{ row.user.role }}</span></td>
+                            <td>{{ row.notes }}</td>
+                            <td>{{ row.enroll }}/20</td>
+                            <td>{{ row.verify }}</td>
+                            <td>{{ row.free_text }}</td>
+                            <td>{{ row.total }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <div class="two-column">
+        <section class="card">
+            <p class="eyebrow">Distribucija</p>
+            <h2>Tipovi uzoraka</h2>
+            <div class="prompt-list-preview">
+                {% for sample_type, count in sample_types %}
+                    <div><strong>{{ count }}</strong><span>{{ sample_type }}</span></div>
+                {% else %}
+                    <p class="muted">Još nema uzoraka.</p>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="card">
+            <p class="eyebrow">Zadnje aktivnosti</p>
+            <h2>Zadnjih 30 uzoraka</h2>
+            <div class="recent-list">
+                {% for sample in recent_samples %}
+                    <div>
+                        <strong>#{{ sample.id }} · {{ sample.username }}</strong>
+                        <span>{{ sample.sample_type }} · {{ sample.prompt_id or '-' }} · {{ sample.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    </div>
+                {% else %}
+                    <p class="muted">Još nema aktivnosti.</p>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+</section>
+{% endblock %}

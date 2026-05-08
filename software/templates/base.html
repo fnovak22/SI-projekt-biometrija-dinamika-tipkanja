@@ -3,25 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Dinamika tipkanja{% endblock %}</title>
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="page-shell">
         <header class="topbar">
             <a class="brand" href="{{ url_for('index') if logged_in_username else url_for('login') }}">
-                <span class="brand-icon">⌨</span>
+                <span class="brand-icon">📝</span>
                 <span>
-                    <strong>KeyStroke ID</strong>
-                    <small>SVM data collection</small>
+                    <strong>{{ app_name }}</strong>
+                    <small>Privatne bilješke + tiha biometrija tipkanja</small>
                 </span>
             </a>
 
             <nav class="nav">
                 {% if logged_in_username %}
-                    <a href="{{ url_for('index') }}">Početna</a>
-                    <a href="{{ url_for('collect') }}">Prikupljanje</a>
-                    <a href="{{ url_for('samples') }}">Uzorci <span class="pill">{{ nav_sample_count }}</span></a>
+                    <a href="{{ url_for('index') }}">Bilješke</a>
+                    <a href="{{ url_for('note_new') }}">Nova bilješka</a>
+                    <a href="{{ url_for('samples') }}">Moji uzorci <span class="pill">{{ nav_sample_count }}</span></a>
+                    {% if logged_in_role == 'admin' %}
+                        <a href="{{ url_for('admin_dashboard') }}">Research admin</a>
+                    {% endif %}
                     <a class="nav-muted" href="{{ url_for('logout') }}">Odjava</a>
                 {% else %}
                     <a href="{{ url_for('login') }}">Prijava</a>

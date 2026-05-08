@@ -345,3 +345,58 @@ code {
     font-size: 12px;
     font-weight: 900;
 }
+
+.small-lead { font-size: 15px; margin-top: 18px; }
+.notes-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+}
+.hero-actions { justify-content: flex-end; min-width: 260px; }
+.note-list { display: grid; gap: 12px; }
+.note-item {
+    display: block;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: #fff;
+    color: var(--text);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.note-item:hover {
+    color: var(--text);
+    transform: translateY(-1px);
+    border-color: #c7d2fe;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+}
+.note-item strong, .note-item span, .note-item small { display: block; }
+.note-item span { margin-top: 6px; color: var(--muted); font-weight: 500; line-height: 1.55; }
+.note-item small { margin-top: 10px; color: #94a3b8; font-weight: 800; }
+.compact-empty { padding: 28px 14px; }
+.note-editor h1 { font-size: clamp(30px, 4vw, 48px); }
+.note-body { min-height: 360px; font-size: 17px; line-height: 1.75; }
+.button.danger, button.danger {
+    background: linear-gradient(135deg, #dc2626, #f97316);
+    box-shadow: 0 14px 30px rgba(220, 38, 38, 0.2);
+}
+.prompt-compare { word-break: break-word; }
+.char {
+    display: inline;
+    border-radius: 5px;
+    padding: 1px 0;
+    white-space: pre-wrap;
+}
+.char.correct { color: #166534; background: #dcfce7; }
+.char.pending { color: #111827; }
+.char.wrong { color: #991b1b; background: #fee2e2; text-decoration: underline; text-decoration-thickness: 2px; }
+.char.extra { margin-left: 3px; padding: 1px 4px; }
+.recent-list { display: grid; gap: 10px; margin-top: 14px; max-height: 520px; overflow: auto; }
+.recent-list div { padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: #f8fafc; }
+.recent-list strong, .recent-list span { display: block; }
+.recent-list span { margin-top: 4px; color: var(--muted); }
+
+@media (max-width: 860px) {
+    .notes-hero { align-items: flex-start; flex-direction: column; }
+    .hero-actions { justify-content: flex-start; min-width: 0; }
+}

@@ -1,15 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Registracija | KeyStroke ID{% endblock %}
+{% block title %}Registracija | {{ app_name }}{% endblock %}
 {% block content %}
 <section class="auth-layout narrow">
     <div class="hero-card">
         <p class="eyebrow">Registracija + enrollment</p>
-        <h1>Račun se aktivira tek nakon {{ required_samples }} uzoraka tipkanja</h1>
-        <p class="lead">Prvo uneseš korisničko ime i lozinku, a zatim moraš prepisati 5 fiksnih fraza po 4 puta. To odmah daje podatke za SVM tim.</p>
+        <h1>Račun se aktivira nakon {{ required_samples }} uzoraka tipkanja</h1>
+        <p class="lead">Nakon korisničkog imena i lozinke prepisuješ 5 fiksnih fraza po 4 puta. Ti uzorci služe za drugi korak prijave i ML istraživanje.</p>
         <div class="info-grid two">
             <div><strong>5 fraza</strong><span>usporedivi promptovi</span></div>
             <div><strong>20 uzoraka</strong><span>obavezno za registraciju</span></div>
         </div>
+        <p class="lead small-lead">Za research admin račun registrirajte korisničko ime <strong>admin</strong>.</p>
     </div>
 
     <form class="card auth-card" method="POST" action="{{ url_for('register') }}">
