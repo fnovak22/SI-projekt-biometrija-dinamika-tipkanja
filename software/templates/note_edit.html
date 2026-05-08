@@ -5,7 +5,7 @@
     <form class="card note-editor" method="POST" action="{{ url_for('note_edit', note_id=note.id) if note else url_for('note_new') }}">
         <p class="eyebrow">Privatna bilješka</p>
         <h1>{% if note %}Uredi bilješku{% else %}Nova bilješka{% endif %}</h1>
-        <p class="muted">Slobodno piši tekst. Svakih nekoliko rečenica editor može spremiti anonimni prozor tipkanja kao ML uzorak za demonstraciju continuous authentication koncepta.</p>
+        <p class="muted">Zapiši što ti je na pameti. Svako malo spremit ćemo uzorak tvojeg tipkanja kao ML uzorak za demonstraciju kontinuirane autentifikacije nad free-text unosom.</p>
 
         <label for="title">Naslov</label>
         <input id="title" name="title" type="text" value="{{ note.title if note else '' }}" placeholder="Npr. Plan za projekt" autocomplete="off">
@@ -17,7 +17,7 @@
             <button class="button" type="submit">Spremi bilješku</button>
             <a class="button secondary" href="{{ url_for('index') }}">Natrag</a>
         </div>
-        <div id="typingStatus" class="status info">Free-text praćenje je spremno. Pošalje se tek kad ima dovoljno ručnog tipkanja.</div>
+        <div id="typingStatus" class="status info">Free-text praćenje je spremno. Uzorak se šalje tek kad ima dovoljno natipkaih znakova.</div>
     </form>
 
     <aside class="card side-card">
