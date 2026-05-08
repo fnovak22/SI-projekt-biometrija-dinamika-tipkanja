@@ -1,86 +1,52 @@
-# KeyStroke ID — prototip za dinamiku tipkanja
+# MyNotes — privatne bilješke s provjerom dinamike tipkanja
 
-Tema projekta: **Identifikacija korisnika pomoću dinamike tipkanja**.
+MyNotes je Flask prototip web aplikacije za privatne bilješke. Aplikacija izgleda kao stvarni notes sustav, a dinamika tipkanja koristi se kao dodatni sigurnosni sloj i izvor podataka za ML istraživanje.
 
-Ova verzija prototipa ima:
+## Što je dodano
 
-- registraciju koja se završava tek nakon **20 obaveznih enrollment uzoraka**
-- 5 fiksnih duljih fraza ponovljenih 4 puta (`5 x 4 = 20`)
-- dvo-korak prijavu: prvo lozinka, zatim provjera tipkanja
-- placeholder za SVM model dok ML tim ne spoji stvarni model
-- spremanje raw `keydown`/`keyup` eventova i osnovnih featurea u SQLite
-- CSV export za ML tim
+- hrvatski UI i naziv aplikacije **MyNotes**
+- privatne bilješke: kreiranje, uređivanje i brisanje
+- drugi korak prijave sada bira **random frazu** iz enrollment skupa, umjesto uvijek prve fraze
+- enrollment i login provjera označavaju krivo napisane znakove crveno
+- Enter sprema enrollment uzorak / pokreće login provjeru
+- uklonjen kratki lažni prikaz greške nakon spremanja uzorka
+- free-text uzorci iz editora bilješki spremaju se kao `free_text_note`
+- research admin dashboard na `/admin`
+- CSV export za ML analizu
+- demo research admin korisnik automatski postoji u bazi: `admin` / `admin`
+- fixed-text model više ne koristi `backspace_count` / `backspace_ratio`, ali se backspace i dalje sprema u feature extraction i CSV za kasnije free-text eksperimente
+
+## Admin račun
+
+Demo research admin račun je već dodan u bazu:
+
+```text
+korisničko ime: admin
+lozinka: admin
+```
+
+Admin se prijavljuje bez dodatne provjere dinamike tipkanja jer služi za research dashboard, statistike i CSV export.
 
 ## Pokretanje
 
 ```bash
-python -m venv venv
-
-(Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned) ; (& C:\SI-projekt-biometrija-dinamika-tipkanja\venv\Scripts\Activate.ps1)
-
-pip install -r requirements.txt
-python software/app.py
+cd software
+python app.py
 ```
 
-Otvori:
+Aplikacija koristi SQLite bazu u `instance/app.db`.
 
-```text
-http://127.0.0.1:5000
-```
+## Napomena za fixed-text toleranciju i debug
 
-## Testiranje aplikacije
+Fixed-text provjera koristi One-Class SVM s `nu=0.15`. Prihvaćanje nije ručno postavljen postotak tolerancije, nego model prihvaća pokušaj kada je `prediction == 1`, odnosno kada je `decision_function` score barem `0`.
 
-1. Otvori `/register`.
-2. Unesi korisničko ime i lozinku.
-3. Nakon toga prepiši svih 20 fraza koje aplikacija traži.
-4. Tek nakon 20 spremljenih uzoraka registracija je završena.
-5. Prijavi se na `/login`.
-6. Nakon točne lozinke aplikacija traži dodatnu frazu za provjeru tipkanja.
-7. Budući da model još nije spojen, taj korak trenutno samo sprema uzorak kao `verify_attempt` i propušta korisnika ako je tekst točno prepisan.
+Backspace se i dalje sprema u `features_json` i CSV export, ali se ne koristi u fixed-text vektoru. Fixed-text vektor trenutno ima redoslijed:
 
-## Gdje su podaci?
+1. `avg_dwell_ms`
+2. `avg_dd_interval_ms`
+3. `std_dwell_ms`
+4. `std_dd_interval_ms`
+5. `typing_speed_chars_per_sec`
+6. `pause_ratio`
 
-SQLite baza:
-
-```text
-instance/app.db
-```
-
-Tablica:
-
-```text
-typing_sample
-```
-
-CSV export:
-
-```text
-/export/typing-samples.csv
-```
-
-Važni stupci za ML tim:
-
-- `username` — labela korisnika
-- `sample_type` — `enroll`, `extra_enroll` ili `verify_attempt`
-- `prompt_id` — koja je fraza pisana
-- `prompt_text`
-- `typed_text`
-- `duration_ms`
-- `backspace_count`
-- `avg_dwell_ms`
-- `avg_dd_interval_ms`
-- `dwell_times_ms`
-- `dd_intervals_ms`
-- `events_json`
-
-Za prvi model preporuka je krenuti s `sample_type=enroll`, grupirati po `username` i `prompt_id`, te koristiti `dwell_times_ms` i `dd_intervals_ms`.
-
-## Gdje se spaja model?
-
-U `software/app.py` postoji funkcija:
-
-```python
-verify_typing_with_model_stub(user, features, prompt_id)
-```
-
-To je placeholder. ML tim kasnije tamo može ubaciti poziv na istrenirani SVM model.
+Na stranici drugog koraka prijave browser console ispisuje profil korisnika i detalje svakog pokušaja. Uspješni verify pokušaji se spremaju kao `verify_success` i koriste se kod sljedećih treniranja modela. Neuspješni pokušaji se spremaju kao `verify_failed` i ne koriste se za treniranje.

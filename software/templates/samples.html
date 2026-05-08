@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Spremljeni uzorci | KeyStroke ID{% endblock %}
+{% block title %}Moji uzorci | {{ app_name }}{% endblock %}
 {% block content %}
 <section class="card">
     <div class="section-head">
         <div>
             <p class="eyebrow">Provjera podataka</p>
             <h1>Spremljeni uzorci</h1>
-            <p class="muted">Ovdje vidiš zadnjih 50 uzoraka trenutno prijavljenog korisnika. CSV export sadrži uzorke svih korisnika.</p>
+            <p class="muted">Ovdje vidiš zadnjih 50 svojih uzoraka. Administratorski račun može izvesti CSV svih korisnika.</p>
         </div>
-        <a class="button" href="{{ url_for('export_typing_samples_csv') }}">Preuzmi CSV za ML tim</a>
+        <a class="button" href="{{ url_for('export_typing_samples_csv') }}">Preuzmi CSV</a>
     </div>
 
     {% if rows %}
@@ -26,6 +26,10 @@
                         <th>Backspace</th>
                         <th>Avg dwell</th>
                         <th>Avg DD</th>
+                        <th>Std dwell</th>
+                        <th>Std DD</th>
+                        <th>Brzina</th>
+                        <th>Pauze</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -41,6 +45,10 @@
                             <td>{{ row.features.backspace_count }}</td>
                             <td>{{ row.features.avg_dwell_ms }} ms</td>
                             <td>{{ row.features.avg_dd_interval_ms }} ms</td>
+                            <td>{{ row.features.std_dwell_ms|default('-') }} ms</td>
+                            <td>{{ row.features.std_dd_interval_ms|default('-') }} ms</td>
+                            <td>{{ row.features.typing_speed_chars_per_sec|default('-') }}</td>
+                            <td>{{ row.features.pause_ratio|default('-') }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -50,7 +58,7 @@
         <div class="empty-state">
             <h2>Još nema uzoraka</h2>
             <p class="muted">Ako si upravo napravio račun, obavezni enrollment uzorci će se vidjeti nakon prve uspješne prijave.</p>
-            <a class="button" href="{{ url_for('collect') }}">Prikupi dodatni uzorak</a>
+            <a class="button" href="{{ url_for('collect') }}">Prikupi fixed-text uzorak</a>
         </div>
     {% endif %}
 </section>

@@ -1,21 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Prijava | KeyStroke ID{% endblock %}
+{% block title %}Prijava | {{ app_name }}{% endblock %}
 {% block content %}
 <section class="auth-layout">
     <div class="hero-card">
-        <p class="eyebrow">Dvo-korak prijava</p>
-        <h1>Lozinka prvo, dinamika tipkanja odmah nakon toga</h1>
-        <p class="lead">Ako su korisničko ime i lozinka točni, aplikacija traži dodatnu frazu. Trenutno je SVM dio placeholder dok tim ne spoji model.</p>
+        <p class="eyebrow">Privatni radni prostor</p>
+        <h1>Tvoje bilješke ostaju zaključane iza lozinke i dinamike tipkanja</h1>
+        <p class="lead">MyNotes izgleda kao obična aplikacija za privatne bilješke, ali nakon lozinke koristi dodatnu provjeru identiteta na temelju ritma tipkanja.</p>
         <div class="info-grid">
-            <div><strong>1</strong><span>username + lozinka</span></div>
-            <div><strong>2</strong><span>typing verification</span></div>
-            <div><strong>SVM</strong><span>spaja se kasnije</span></div>
+            <div><strong>1</strong><span>korisničko ime + lozinka</span></div>
+            <div><strong>2</strong><span>random fraza iz enrollmenta</span></div>
+            <div><strong>ML</strong><span>research dashboard za uzorke</span></div>
         </div>
     </div>
 
     <form class="card auth-card" method="POST" action="{{ url_for('login') }}">
         <h2>Prijava</h2>
-        <p class="muted">Nakon točne lozinke slijedi dodatna provjera dinamike tipkanja.</p>
+        <p class="muted">Nakon točne lozinke slijedi kratka provjera dinamike tipkanja.</p>
 
         <label for="username">Korisničko ime</label>
         <input id="username" name="username" type="text" value="{{ username_value }}" autocomplete="username" required autofocus>

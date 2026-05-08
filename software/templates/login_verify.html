@@ -1,20 +1,20 @@
 {% extends "base.html" %}
-{% block title %}Provjera tipkanja | KeyStroke ID{% endblock %}
+{% block title %}Provjera tipkanja | {{ app_name }}{% endblock %}
 {% block content %}
 <section class="collect-layout">
     <div class="card collect-card">
         <p class="eyebrow">2. korak prijave za {{ username }}</p>
-        <h1>Prepiši frazu za provjeru identiteta</h1>
-        <p class="muted">Sustav sprema pokušaj kao <code>verify_attempt</code> i provjerava dinamiku tipkanja pomoću fixed-text One-Class SVM modela.</p>
+        <h1>Prepiši random frazu za provjeru identiteta</h1>
+        <p class="muted">Aplikacija bira jednu od 5 enrollment fraza. Ako provjera ne prođe, dobit ćeš drugu frazu. Enter pokreće provjeru kada je tekst točan.</p>
 
         <div class="model-placeholder">
             <strong>Model status:</strong>
-            <span>fixed-text One-Class SVM model spojen</span>
+            <span>fixed-text One-Class SVM, tolerancija <code>nu = 0.15</code>, model koristi očišćene znakove završne fraze bez Backspace/Delete/navigation tipki</span>
         </div>
 
-        <div class="prompt-box" id="promptText">{{ prompt.text }}</div>
+        <div class="prompt-box prompt-compare" id="promptText"></div>
         <div class="typing-meta">
-            <span>Prompt: <strong>{{ prompt.id }}</strong></span>
+            <span>Prompt: <strong id="promptIdText">{{ prompt.id }}</strong></span>
             <span>Status: <strong id="matchText">čeka unos</strong></span>
         </div>
 
@@ -30,26 +30,61 @@
     </div>
 
     <aside class="card side-card">
-        <h2>Kasnije za ML tim</h2>
-        <p class="muted">U funkciji <code>verify_typing_with_model_stub</code> u <code>software/app.py</code> treba zamijeniti placeholder stvarnim pozivom SVM modela.</p>
+        <h2>Debug u browser konzoli</h2>
+        <p class="muted">Na otvaranju stranice ispisuje se profil korisnika. Nakon svakog pokušaja ispisuju se featurei, fixed-vector, score i rezultat usporedbe.</p>
+        <p class="muted">Uspješni pokušaji ulaze u buduće treniranje modela. Neuspješni pokušaji se spremaju samo za analizu i ne koriste se za treniranje.</p>
     </aside>
 </section>
 
 <script>
-    const promptItem = {{ prompt|tojson }};
+    let promptItem = {{ prompt|tojson }};
+    const initialDebugStats = {{ debug_stats|tojson }};
     let events = [];
     let startedAt = null;
+    let attemptNumber = 0;
 
+    const promptText = document.getElementById("promptText");
     const typingBox = document.getElementById("typingBox");
     const statusBox = document.getElementById("status");
     const verifyBtn = document.getElementById("verifyBtn");
     const resetBtn = document.getElementById("resetBtn");
     const matchText = document.getElementById("matchText");
+    const promptIdText = document.getElementById("promptIdText");
+
+    console.group("[MyNotes biometrika] Profil korisnika na otvaranju stranice");
+    console.log("Korisnik:", {{ username|tojson }});
+    console.log("Model:", initialDebugStats.model);
+    console.log("Feature redoslijed fixed vektora:", initialDebugStats.feature_names);
+    console.log("Sažetak trening profila:", initialDebugStats.overall_summary);
+    console.log("Sažetak po promptu:", initialDebugStats.per_prompt_summary);
+    console.log("Broj enrollment uzoraka:", initialDebugStats.enrollment_sample_count);
+    console.log("Broj uspješnih verify uzoraka u treningu:", initialDebugStats.successful_verify_sample_count);
+    console.log("Broj neuspješnih verify uzoraka izvan treninga:", initialDebugStats.failed_verify_sample_count);
+    console.groupEnd();
 
     function nowRelative() {
         const n = performance.now();
         if (startedAt === null) startedAt = n;
         return +(n - startedAt).toFixed(3);
+    }
+
+    function escapeHtml(value) {
+        return value.replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[ch]));
+    }
+
+    function renderComparedPrompt(expected, typed) {
+        let html = "";
+        for (let i = 0; i < expected.length; i++) {
+            const expectedChar = expected[i];
+            const typedChar = typed[i];
+            let cls = "pending";
+            if (typedChar !== undefined) cls = typedChar === expectedChar ? "correct" : "wrong";
+            html += `<span class="char ${cls}">${escapeHtml(expectedChar)}</span>`;
+        }
+        if (typed.length > expected.length) {
+            html += `<span class="char wrong extra">${escapeHtml(typed.slice(expected.length))}</span>`;
+        }
+        promptText.innerHTML = html;
     }
 
     function setStatus(message, type = "") {
@@ -59,6 +94,8 @@
 
     function updateProgress() {
         const typed = typingBox.value;
+        promptIdText.textContent = promptItem.id;
+        renderComparedPrompt(promptItem.text, typed);
         if (!typed.length) {
             matchText.textContent = "čeka unos";
             matchText.className = "";
@@ -68,23 +105,24 @@
             matchText.textContent = typed === promptItem.text ? "točno" : `${typed.length}/${promptItem.text.length}`;
             matchText.className = "good";
         } else {
-            matchText.textContent = "greška u tekstu";
+            const firstWrong = [...typed].findIndex((ch, index) => ch !== promptItem.text[index]);
+            matchText.textContent = firstWrong >= 0 ? `greška na znaku ${firstWrong + 1}` : "greška u tekstu";
             matchText.className = "bad";
         }
     }
 
-    function resetTyping() {
+    function resetTyping(message) {
         typingBox.value = "";
         events = [];
         startedAt = null;
         verifyBtn.disabled = false;
-        setStatus("Prepiši frazu za završetak prijave.");
+        setStatus(message || "Prepiši frazu za završetak prijave. Enter pokreće provjeru.");
         updateProgress();
         setTimeout(() => typingBox.focus(), 50);
     }
 
     function recordEvent(e) {
-        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        if (e.key === "Enter" || e.ctrlKey || e.altKey || e.metaKey) return;
         events.push({
             type: e.type,
             key: e.key,
@@ -96,15 +134,28 @@
         });
     }
 
-    typingBox.addEventListener("keydown", recordEvent);
-    typingBox.addEventListener("keyup", recordEvent);
-    typingBox.addEventListener("input", updateProgress);
-    resetBtn.addEventListener("click", resetTyping);
+    function logAttemptResult(data, httpStatusOk) {
+        attemptNumber += 1;
+        console.group(`[MyNotes biometrika] Pokušaj #${attemptNumber} — ${data.accepted ? "PRIHVAĆEN" : "ODBIJEN"}`);
+        console.log("HTTP status OK:", httpStatusOk);
+        console.log("Prompt:", promptItem.id, promptItem.text);
+        console.log("Prihvaćen:", data.accepted);
+        console.log("Sample ID:", data.sample_id);
+        console.log("Model rezultat:", data.model);
+        console.log("Fixed feature redoslijed:", (data.debug_stats || data.debug_stats_before_retrain || initialDebugStats).feature_names);
+        console.log("Fixed vector pokušaja:", data.fixed_vector);
+        console.log("Raw featurei pokušaja:", data.features);
+        console.log("Profil/statistika korisnika:", data.debug_stats || data.debug_stats_before_retrain || initialDebugStats);
+        if (data.retrain_result) console.log("Retrain nakon uspješnog pokušaja:", data.retrain_result);
+        if (data.new_prompt) console.log("Nova fraza nakon odbijanja:", data.new_prompt);
+        console.groupEnd();
+    }
 
-    verifyBtn.addEventListener("click", async () => {
-        const typed = typingBox.value.trim();
+    async function verifyCurrentSample() {
+        const typed = typingBox.value;
         if (typed !== promptItem.text) {
-            setStatus("Tekst se ne poklapa s frazom.", "bad");
+            updateProgress();
+            setStatus("Tekst se ne poklapa s frazom. Crveno označeno mjesto pokazuje grešku.", "bad");
             return;
         }
         if (events.length < 10) {
@@ -127,20 +178,40 @@
                 })
             });
             const data = await res.json();
+            logAttemptResult(data, res.ok);
 
             if (!res.ok || !data.ok || !data.accepted) {
-                setStatus("Provjera nije prošla: " + ((data.model && data.model.message) || data.error || "nepoznata greška"), "bad");
-                verifyBtn.disabled = false;
+                if (data.new_prompt) {
+                    promptItem = data.new_prompt;
+                    resetTyping("Provjera nije prošla. Dodijeljena je nova fraza — prepiši je za novi pokušaj.");
+                } else {
+                    setStatus("Provjera nije prošla: " + ((data.model && data.model.message) || data.error || "nepoznata greška"), "bad");
+                    verifyBtn.disabled = false;
+                }
                 return;
             }
 
-            setStatus("Provjera je prošla. Preusmjeravam na početnu...", "good");
+            setStatus("Provjera je prošla. Preusmjeravam na bilješke...", "good");
             window.location.href = data.redirect_url;
         } catch (err) {
+            console.error("[MyNotes biometrika] Greška kod verify requesta:", err);
             setStatus("Greška: server nije odgovorio. Provjeri je li Flask aplikacija pokrenuta.", "bad");
             verifyBtn.disabled = false;
         }
+    }
+
+    typingBox.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            verifyCurrentSample();
+            return;
+        }
+        recordEvent(e);
     });
+    typingBox.addEventListener("keyup", recordEvent);
+    typingBox.addEventListener("input", updateProgress);
+    resetBtn.addEventListener("click", () => resetTyping());
+    verifyBtn.addEventListener("click", verifyCurrentSample);
 
     resetTyping();
 </script>

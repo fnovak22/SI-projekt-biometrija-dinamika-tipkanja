@@ -28,15 +28,15 @@ def get_fixed_model_path(user_id):
 
 
 def train_fixed_model(user_id, TypingSample):
-    samples = TypingSample.query.filter_by(
-        user_id=user_id,
-        sample_type="enroll"
+    samples = TypingSample.query.filter(
+        TypingSample.user_id == user_id,
+        TypingSample.sample_type.in_(["enroll", "verify_success"])
     ).all()
 
     if len(samples) < 20:
         return {
             "success": False,
-            "message": "Nema dovoljno uzoraka za treniranje modela."
+            "message": "Nema dovoljno enrollment/uspješnih verify uzoraka za treniranje modela."
         }
 
     X = []
@@ -51,6 +51,10 @@ def train_fixed_model(user_id, TypingSample):
         ("svm", OneClassSVM(
             kernel="rbf",
             gamma="scale",
+            # Tolerancija fixed-text modela. One-Class SVM prihvaća uzorak kada
+            # prediction == 1, što odgovara scoreu decision_function >= 0.
+            # nu=0.15 je okvirna gornja granica udjela trening outliera, nije
+            # običan postotak dopuštenog odstupanja za svaki login pokušaj.
             nu=0.15
         ))
     ])

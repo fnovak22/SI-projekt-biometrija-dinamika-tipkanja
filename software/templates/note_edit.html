@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}{% if note %}{{ note.title }}{% else %}Nova bilješka{% endif %} | {{ app_name }}{% endblock %}
+{% block content %}
+<section class="collect-layout">
+    <form class="card note-editor" id="noteForm" method="POST" action="{{ url_for('note_edit', note_id=note.id) if note else url_for('note_new') }}">
+        <p class="eyebrow">Privatna bilješka</p>
+        <h1>{% if note %}Uredi bilješku{% else %}Nova bilješka{% endif %}</h1>
+        <p class="muted">Zapiši što ti je na pameti. Svako malo spremit ćemo uzorak tvojeg tipkanja kao ML uzorak za demonstraciju kontinuirane autentifikacije nad free-text unosom.</p>
+
+        <label for="title">Naslov</label>
+        <input id="title" name="title" type="text" value="{{ note.title if note else '' }}" placeholder="Npr. Plan za projekt" autocomplete="off">
+
+        <label for="body">Tekst bilješke</label>
+        <textarea id="body" name="body" class="note-body" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true" placeholder="Napiši svoju bilješku ovdje...">{{ note.body if note else '' }}</textarea>
+
+        <div class="actions">
+            <button class="button" type="submit">Spremi bilješku</button>
+            <a class="button secondary" href="{{ url_for('index') }}">Natrag</a>
+        </div>
+        <div id="typingStatus" class="status info">Free-text praćenje je spremno. Uzorak se šalje tek kad ima dovoljno natipkanih znakova.</div>
+    </form>
+
+    <aside class="card side-card">
+        <h2>Tiha provjera identiteta</h2>
+        <p class="muted">Ovdje korisnik ne prepisuje zadanu frazu. Ovo je prirodan free-text scenarij: bilješka se koristi kao stvarni kontekst aplikacije, a dinamika tipkanja kao dodatni sigurnosni signal.</p>
+        <ul class="feature-list compact">
+            <li><strong>sample_type</strong><span>free_text_note</span></li>
+            <li><strong>prompt_id</strong><span>free_text</span></li>
+            <li><strong>sprema se</strong><span>typed_text, events_json, features_json</span></li>
+            <li><strong>backspace_count</strong><span>spremljen za free-text ML</span></li>
+            <li><strong>dosad spremljeno</strong><span id="freeTextCount">{{ free_text_readiness.sample_count if free_text_readiness else 0 }}</span></li>
+            <li><strong>export</strong><span>CSV za ML analizu</span></li>
+        </ul>
+        <div class="model-placeholder">
+            <strong>ML tim:</strong> free-text podaci se već spremaju kroz endpoint <code>/api/notes/typing-window</code>. Model još nije uključen u odluku o prijavi.
+        </div>
+        {% if note %}
+            <form method="POST" action="{{ url_for('note_delete', note_id=note.id) }}" onsubmit="return confirm('Obrisati ovu bilješku?');">
+                <button class="button danger full" type="submit">Obriši bilješku</button>
+            </form>
+        {% endif %}
+    </aside>
+</section>
+
+<script>
+    const noteForm = document.getElementById("noteForm");
+    const bodyBox = document.getElementById("body");
+    const typingStatus = document.getElementById("typingStatus");
+    const freeTextCount = document.getElementById("freeTextCount");
+    const initialFreeTextReadiness = {{ free_text_readiness|tojson }};
+    console.group("[MyNotes free-text] Spremnost za ML tim");
+    console.log("Free-text readiness:", initialFreeTextReadiness);
+    console.log("Feature extraction uključuje backspace_count za free-text uzorke.");
+    console.groupEnd();
+    let events = [];
+    let windowTextStart = bodyBox.value.length;
+    let startedAt = null;
+    let lastSentAt = 0;
+
+    function nowRelative() {
+        const n = performance.now();
+        if (startedAt === null) startedAt = n;
+        return +(n - startedAt).toFixed(3);
+    }
+
+    function setTypingStatus(message, type = "info") {
+        typingStatus.textContent = message;
+        typingStatus.className = "status " + type;
+    }
+
+    function recordEvent(e) {
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        events.push({
+            type: e.type,
+            key: e.key,
+            code: e.code,
+            t: nowRelative(),
+            repeat: e.repeat,
+            shiftKey: e.shiftKey,
+            inputLength: bodyBox.value.length
+        });
+    }
+
+    async function sendTypingWindow(force = false) {
+        const currentLength = bodyBox.value.length;
+        let segment = bodyBox.value.slice(windowTextStart);
+        if (segment.trim().length < 20 && force) {
+            segment = bodyBox.value;
+        }
+        const enoughText = segment.trim().length >= (force ? 20 : 80);
+        const enoughEvents = events.length >= (force ? 10 : 40);
+        const cooldownPassed = performance.now() - lastSentAt > 5000;
+        if (!enoughText || !enoughEvents || (!force && !cooldownPassed)) return false;
+
+        const payload = { typed_text: segment, events: events };
+        events = [];
+        windowTextStart = currentLength;
+        startedAt = null;
+        lastSentAt = performance.now();
+        setTypingStatus("Spremam free-text prozor tipkanja...", "info");
+
+        try {
+            const res = await fetch("{{ url_for('api_note_typing_window') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                setTypingStatus("Free-text prozor nije spremljen: " + (data.error || "nepoznata greška"), "bad");
+                return false;
+            }
+            console.group(`[MyNotes free-text] Spremljen uzorak #${data.sample_id}`);
+            console.log("Featurei free-text uzorka:", data.features);
+            console.log("Free-text readiness:", data.free_text_readiness);
+            console.groupEnd();
+            if (freeTextCount && data.free_text_readiness) freeTextCount.textContent = data.free_text_readiness.sample_count;
+            setTypingStatus(`Free-text uzorak #${data.sample_id} spremljen.`, "good");
+            return true;
+        } catch (err) {
+            console.error("[MyNotes free-text] Greška kod spremanja:", err);
+            setTypingStatus("Server nije odgovorio za free-text uzorak.", "bad");
+            return false;
+        }
+    }
+
+    function maybeSendTypingWindow() {
+        sendTypingWindow(false);
+    }
+
+    let submitting = false;
+    noteForm.addEventListener("submit", async (e) => {
+        if (submitting) return;
+        e.preventDefault();
+        await sendTypingWindow(true);
+        submitting = true;
+        noteForm.submit();
+    });
+
+    bodyBox.addEventListener("keydown", recordEvent);
+    bodyBox.addEventListener("keyup", recordEvent);
+    bodyBox.addEventListener("input", maybeSendTypingWindow);
+</script>
+{% endblock %}
