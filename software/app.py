@@ -4,6 +4,7 @@ import json
 import os
 import random
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from functools import wraps
 
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, url_for
@@ -12,12 +13,22 @@ from sqlalchemy import func, inspect, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ml.fixed_text_model import train_fixed_model, verify_fixed_typing
-from ml.feature_extractor import features_to_vector_fixed
+from ml.feature_extractor import (
+    attach_fixed_text_features,
+    extract_features as extract_raw_features,
+    features_to_vector_fixed,
+)
 
 # --- setup ---
 db = SQLAlchemy()
 
 APP_NAME = "MyNotes"
+CROATIA_TZ = ZoneInfo("Europe/Zagreb")
+
+
+def now_croatia():
+    """Vraća lokalno vrijeme za Hrvatsku kao naive datetime za SQLite prikaz."""
+    return datetime.now(CROATIA_TZ).replace(tzinfo=None)
 
 # 5 fiksnih duljih fraza x 4 ponavljanja = 20 enrollment uzoraka.
 ENROLLMENT_PROMPTS = [
@@ -30,6 +41,19 @@ ENROLLMENT_PROMPTS = [
 REPEATS_PER_PROMPT = 4
 REQUIRED_ENROLLMENT_SAMPLES = len(ENROLLMENT_PROMPTS) * REPEATS_PER_PROMPT
 PROMPT_BY_ID = {p["id"]: p["text"] for p in ENROLLMENT_PROMPTS}
+
+FEATURE_LABELS_HR = {
+    "duration_ms": "Ukupno trajanje (ms)",
+    "keydown_count": "Broj keydown događaja",
+    "keyup_count": "Broj keyup događaja",
+    "char_count": "Broj znakova",
+    "avg_dwell_ms": "Prosječno držanje tipke (ms)",
+    "avg_dd_interval_ms": "Prosječni razmak keydown-keydown (ms)",
+    "std_dwell_ms": "Std držanja tipke (ms)",
+    "std_dd_interval_ms": "Std razmaka keydown-keydown (ms)",
+    "typing_speed_chars_per_sec": "Brzina tipkanja (znakova/s)",
+    "pause_ratio": "Udio dužih pauza",
+}
 
 
 def make_enrollment_sequence():
@@ -51,7 +75,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     enrollment_complete = db.Column(db.Boolean, nullable=False, default=False)
     role = db.Column(db.String(20), nullable=False, default="user")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=now_croatia, nullable=False)
 
 
 class TypingSample(db.Model):
@@ -64,7 +88,7 @@ class TypingSample(db.Model):
     typed_text = db.Column(db.Text, nullable=False)
     events_json = db.Column(db.Text, nullable=False)
     features_json = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=now_croatia, nullable=False, index=True)
 
 
 class Note(db.Model):
@@ -72,8 +96,8 @@ class Note(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     title = db.Column(db.String(160), nullable=False, default="Nova bilješka")
     body = db.Column(db.Text, nullable=False, default="")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=now_croatia, nullable=False)
+    updated_at = db.Column(db.DateTime, default=now_croatia, nullable=False, index=True)
 
 
 # --- helpers ---
@@ -258,10 +282,69 @@ def summarize_fixed_text_profile(user_id):
             "nu": 0.15,
             "accepted_when": "prediction == 1, odnosno decision_function score >= 0",
             "note": "nu=0.15 je okvirna tolerancija: model smije tretirati dio trening uzoraka kao rubne/outlier uzorke, ali nije stroga postotna granica za svaki login.",
-            "fixed_text_ignored_feature": "backspace_count",
+            "fixed_text_filter": "Model koristi fixed_text_features: završne znakove fraze bez Backspace/Delete/navigation/modifier tipki i bez obrisanih znakova. Raw events_json i dalje čuva sve za free-text ML.",
         },
         "overall_summary": summarize_vectors(vectors),
         "per_prompt_summary": prompt_stats,
+    }
+
+
+def summarize_enrollment_progress(user_id):
+    samples = TypingSample.query.filter_by(user_id=user_id, sample_type="enroll").order_by(TypingSample.created_at.asc()).all()
+    feature_names = [
+        "duration_ms",
+        "keydown_count",
+        "keyup_count",
+        "char_count",
+        "avg_dwell_ms",
+        "avg_dd_interval_ms",
+        "std_dwell_ms",
+        "std_dd_interval_ms",
+        "typing_speed_chars_per_sec",
+        "pause_ratio",
+    ]
+    values_by_feature = {name: [] for name in feature_names}
+    per_prompt = {}
+    for sample in samples:
+        features = json.loads(sample.features_json)
+        fixed_features = features.get("fixed_text_features", features)
+        bucket = per_prompt.setdefault(sample.prompt_id or "unknown", {"count": 0})
+        bucket["count"] += 1
+        for name in feature_names:
+            value = fixed_features.get(name)
+            if isinstance(value, (int, float)):
+                values_by_feature[name].append(float(value))
+    overall = {}
+    for name, values in values_by_feature.items():
+        overall[name] = {
+            "avg": _avg(values),
+            "std": _std(values),
+            "min": round(min(values), 3) if values else 0.0,
+            "max": round(max(values), 3) if values else 0.0,
+        }
+    return {
+        "sample_count": len(samples),
+        "required_samples": REQUIRED_ENROLLMENT_SAMPLES,
+        "feature_names": feature_names,
+        "fixed_text_filter_note": "Enrollment statistika prikazuje očišćene fixed-text značajke. Backspace, Delete, navigacijske i modifier tipke ostaju u raw podacima, ali se ne koriste za fixed-text model.",
+        "ignored_for_fixed_text_now": ["backspace_count", "Backspace", "Delete", "navigacijske tipke", "modifier tipke"],
+        "overall_summary": overall,
+        "per_prompt_counts": per_prompt,
+    }
+
+
+def summarize_free_text_readiness(user_id):
+    samples = TypingSample.query.filter_by(user_id=user_id, sample_type="free_text_note").order_by(TypingSample.created_at.desc()).limit(20).all()
+    return {
+        "sample_type": "free_text_note",
+        "sample_count": TypingSample.query.filter_by(user_id=user_id, sample_type="free_text_note").count(),
+        "stored_fields": ["typed_text", "events_json", "features_json", "created_at", "user_id"],
+        "features_include": [
+            "duration_ms", "keydown_count", "keyup_count", "char_count", "backspace_count",
+            "avg_dwell_ms", "avg_dd_interval_ms", "std_dwell_ms", "std_dd_interval_ms",
+            "typing_speed_chars_per_sec", "pause_ratio", "dwell_times_ms", "dd_intervals_ms"
+        ],
+        "recent_sample_ids": [s.id for s in samples],
     }
 
 
@@ -277,51 +360,19 @@ def user_is_admin(user):
 
 
 def extract_features(events):
-    """Pretvara raw key evente u osnovne značajke za ML tim."""
-    keydowns = [e for e in events if e.get("type") == "keydown" and not e.get("repeat")]
-    keyups = [e for e in events if e.get("type") == "keyup"]
+    """Raw feature extraction za opću/free-text analizu.
 
-    pending_down = {}
-    dwell_times = []
-    for e in events:
-        key = e.get("key")
-        code = e.get("code")
-        t = float(e.get("t", 0))
-        k = f"{key}|{code}"
-        if e.get("type") == "keydown" and not e.get("repeat"):
-            pending_down.setdefault(k, []).append(t)
-        elif e.get("type") == "keyup" and pending_down.get(k):
-            down_t = pending_down[k].pop(0)
-            dwell_times.append(round(t - down_t, 3))
-
-    dd_intervals = []
-    for i in range(1, len(keydowns)):
-        dd_intervals.append(round(float(keydowns[i].get("t", 0)) - float(keydowns[i - 1].get("t", 0)), 3))
-
-    typed_chars = [e.get("key") for e in keydowns if len(str(e.get("key", ""))) == 1]
-
-    def avg(values):
-        return round(sum(values) / len(values), 3) if values else None
-
-    duration_ms = 0
-    if len(events) >= 2:
-        duration_ms = round(float(events[-1].get("t", 0)) - float(events[0].get("t", 0)), 3)
-
-    return {
-        "duration_ms": duration_ms,
-        "keydown_count": len(keydowns),
-        "keyup_count": len(keyups),
-        "char_count": len(typed_chars),
-        "backspace_count": sum(1 for e in keydowns if e.get("key") == "Backspace"),
-        "avg_dwell_ms": avg(dwell_times),
-        "avg_dd_interval_ms": avg(dd_intervals),
-        "dwell_times_ms": dwell_times,
-        "dd_intervals_ms": dd_intervals,
-    }
+    Za fixed-text uzorke save_typing_sample dodatno sprema fixed_text_features,
+    odnosno očišćenu verziju bez Backspace/Delete/navigation/modifier tipki.
+    Free-text ML tim treba koristiti raw featuree i events_json, ne fixed_text_features.
+    """
+    return extract_raw_features(events)
 
 
 def save_typing_sample(user, sample_type, prompt_id, prompt_text, typed_text, events):
     features = extract_features(events)
+    if sample_type in {"enroll", "verify_attempt", "verify_success", "verify_failed"}:
+        features = attach_fixed_text_features(features, events, final_text=typed_text)
     sample = TypingSample(
         user_id=user.id,
         username=user.username,
@@ -365,6 +416,31 @@ def validate_free_text_payload(data):
     return typed_text, events, None
 
 
+def ensure_fixed_text_features_for_existing_samples():
+    """Dodaje fixed_text_features starim enrollment/verify uzorcima ako ih nemaju.
+
+    Ovo čini stare baze kompatibilnima s novim fixed-text pristupom.
+    Free-text uzorke ne diramo: ML tim za free-text treba cijeli raw signal,
+    uključujući Backspace i korekcije.
+    """
+    fixed_types = ["enroll", "verify_attempt", "verify_success", "verify_failed"]
+    samples = TypingSample.query.filter(TypingSample.sample_type.in_(fixed_types)).all()
+    changed = False
+    for sample in samples:
+        try:
+            features = json.loads(sample.features_json or "{}")
+            if isinstance(features.get("fixed_text_features"), dict):
+                continue
+            events = json.loads(sample.events_json or "[]")
+            features = attach_fixed_text_features(features, events, final_text=sample.typed_text)
+            sample.features_json = json.dumps(features, ensure_ascii=False)
+            changed = True
+        except Exception:
+            continue
+    if changed:
+        db.session.commit()
+
+
 # --- app factory ---
 def create_app():
     app = Flask(__name__)
@@ -385,6 +461,7 @@ def create_app():
         db.create_all()
         ensure_schema()
         seed_admin_user()
+        ensure_fixed_text_features_for_existing_samples()
 
     @app.context_processor
     def inject_globals():
@@ -458,15 +535,14 @@ def create_app():
         user = User.query.get_or_404(session["pending_registration_user_id"])
         count = enrollment_count_for_user(user.id)
         if user.enrollment_complete and count >= REQUIRED_ENROLLMENT_SAMPLES:
-            flash("Enrollment je već završen. Možete se prijaviti.", "success")
-            session.clear()
-            return redirect(url_for("login"))
+            return redirect(url_for("register_complete"))
         return render_template(
             "register_enroll.html",
             username=user.username,
             sequence=make_enrollment_sequence(),
             saved_count=count,
             required_samples=REQUIRED_ENROLLMENT_SAMPLES,
+            enrollment_stats=summarize_enrollment_progress(user.id),
         )
 
     @app.post("/api/registration-sample")
@@ -506,7 +582,9 @@ def create_app():
             "saved_count": count,
             "required_samples": REQUIRED_ENROLLMENT_SAMPLES,
             "complete": complete,
+            "complete_url": url_for("register_complete") if complete else None,
             "train_result": train_result if complete else None,
+            "enrollment_stats": summarize_enrollment_progress(user.id),
         })
 
     @app.get("/register/complete")
@@ -517,6 +595,24 @@ def create_app():
         if count < REQUIRED_ENROLLMENT_SAMPLES:
             flash("Registracija još nije završena. Potrebno je prikupiti svih 20 uzoraka.", "warning")
             return redirect(url_for("register_enroll"))
+
+        user.enrollment_complete = True
+        db.session.commit()
+        return render_template(
+            "register_complete.html",
+            username=user.username,
+            stats=summarize_enrollment_progress(user.id),
+            feature_labels=FEATURE_LABELS_HR,
+        )
+
+    @app.post("/register/finish")
+    @pending_registration_required
+    def register_finish():
+        user = User.query.get_or_404(session["pending_registration_user_id"])
+        if enrollment_count_for_user(user.id) < REQUIRED_ENROLLMENT_SAMPLES:
+            flash("Registracija još nije završena. Potrebno je prikupiti svih 20 uzoraka.", "warning")
+            return redirect(url_for("register_enroll"))
+
         user.enrollment_complete = True
         db.session.commit()
         session.clear()
@@ -651,12 +747,12 @@ def create_app():
         if request.method == "POST":
             title = request.form.get("title", "").strip() or "Nova bilješka"
             body = request.form.get("body", "")
-            note = Note(user_id=session["user_id"], title=title[:160], body=body, updated_at=datetime.utcnow())
+            note = Note(user_id=session["user_id"], title=title[:160], body=body, updated_at=now_croatia())
             db.session.add(note)
             db.session.commit()
             flash("Bilješka je spremljena.", "success")
             return redirect(url_for("note_edit", note_id=note.id))
-        return render_template("note_edit.html", note=None)
+        return render_template("note_edit.html", note=None, free_text_readiness=summarize_free_text_readiness(session.get("user_id", 0)) if session.get("user_id") else None)
 
     @app.route("/notes/<int:note_id>", methods=["GET", "POST"])
     @login_required
@@ -665,11 +761,11 @@ def create_app():
         if request.method == "POST":
             note.title = (request.form.get("title", "").strip() or "Nova bilješka")[:160]
             note.body = request.form.get("body", "")
-            note.updated_at = datetime.utcnow()
+            note.updated_at = now_croatia()
             db.session.commit()
             flash("Bilješka je spremljena.", "success")
             return redirect(url_for("note_edit", note_id=note.id))
-        return render_template("note_edit.html", note=note)
+        return render_template("note_edit.html", note=note, free_text_readiness=summarize_free_text_readiness(session["user_id"]))
 
     @app.post("/notes/<int:note_id>/delete")
     @login_required
@@ -690,7 +786,7 @@ def create_app():
             return jsonify({"ok": False, "error": error_name}), status_code
         user = User.query.get_or_404(session["user_id"])
         sample, features = save_typing_sample(user, "free_text_note", "free_text", "Slobodni tekst iz bilješke", typed_text, events)
-        return jsonify({"ok": True, "sample_id": sample.id, "features": features})
+        return jsonify({"ok": True, "sample_id": sample.id, "features": features, "free_text_readiness": summarize_free_text_readiness(user.id)})
 
     @app.get("/collect")
     @login_required
@@ -709,7 +805,7 @@ def create_app():
         sample_type = str(data.get("sample_type", "extra_enroll"))[:30]
         user = User.query.get_or_404(session["user_id"])
         sample, features = save_typing_sample(user, sample_type, prompt_id, prompt_text, typed_text, events)
-        return jsonify({"ok": True, "sample_id": sample.id, "features": features})
+        return jsonify({"ok": True, "sample_id": sample.id, "features": features, "free_text_readiness": summarize_free_text_readiness(user.id)})
 
     @app.get("/samples")
     @login_required
@@ -736,7 +832,10 @@ def create_app():
                 "user": u,
                 "notes": note_count_for_user(u.id),
                 "enroll": enrollment_count_for_user(u.id),
-                "verify": TypingSample.query.filter_by(user_id=u.id, sample_type="verify_attempt").count(),
+                "verify": TypingSample.query.filter(
+                    TypingSample.user_id == u.id,
+                    TypingSample.sample_type.in_(["verify_success", "verify_failed", "verify_attempt"])
+                ).count(),
                 "free_text": TypingSample.query.filter_by(user_id=u.id, sample_type="free_text_note").count(),
                 "total": TypingSample.query.filter_by(user_id=u.id).count(),
             })
@@ -773,6 +872,10 @@ def create_app():
             "backspace_count",
             "avg_dwell_ms",
             "avg_dd_interval_ms",
+            "std_dwell_ms",
+            "std_dd_interval_ms",
+            "typing_speed_chars_per_sec",
+            "pause_ratio",
             "dwell_times_ms",
             "dd_intervals_ms",
             "events_json",
@@ -800,6 +903,10 @@ def create_app():
                 features.get("backspace_count"),
                 features.get("avg_dwell_ms"),
                 features.get("avg_dd_interval_ms"),
+                features.get("std_dwell_ms"),
+                features.get("std_dd_interval_ms"),
+                features.get("typing_speed_chars_per_sec"),
+                features.get("pause_ratio"),
                 json.dumps(features.get("dwell_times_ms", [])),
                 json.dumps(features.get("dd_intervals_ms", [])),
                 s.events_json,

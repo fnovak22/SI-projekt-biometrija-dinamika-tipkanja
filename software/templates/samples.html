@@ -26,6 +26,10 @@
                         <th>Backspace</th>
                         <th>Avg dwell</th>
                         <th>Avg DD</th>
+                        <th>Std dwell</th>
+                        <th>Std DD</th>
+                        <th>Brzina</th>
+                        <th>Pauze</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -41,6 +45,10 @@
                             <td>{{ row.features.backspace_count }}</td>
                             <td>{{ row.features.avg_dwell_ms }} ms</td>
                             <td>{{ row.features.avg_dd_interval_ms }} ms</td>
+                            <td>{{ row.features.std_dwell_ms|default('-') }} ms</td>
+                            <td>{{ row.features.std_dd_interval_ms|default('-') }} ms</td>
+                            <td>{{ row.features.typing_speed_chars_per_sec|default('-') }}</td>
+                            <td>{{ row.features.pause_ratio|default('-') }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Enrollment dovršen | {{ app_name }}{% endblock %}
+{% block content %}
+<section class="complete-layout">
+    <div class="complete-hero hero-card">
+        <p class="eyebrow">Registracija je dovršena</p>
+        <h1>Tvoj MyNotes račun je spreman.</h1>
+        <p class="lead">Enrollment dinamike tipkanja je uspješno završen. MyNotes je naučio osnovni fixed-text profil tvog tipkanja i kod svake sljedeće prijave koristit će ga kao dodatni sigurnosni korak nakon lozinke.</p>
+        <div class="info-grid complete-kpis">
+            <div>
+                <strong>{{ stats.sample_count }}/{{ stats.required_samples }}</strong>
+                <span>spremljenih uzoraka</span>
+            </div>
+            <div>
+                <strong>5 × 4</strong>
+                <span>fraza i ponavljanja</span>
+            </div>
+            <div>
+                <strong>2FA</strong>
+                <span>lozinka + dinamika tipkanja</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card complete-card">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Što slijedi?</p>
+                <h2>Kako će izgledati prijava</h2>
+            </div>
+        </div>
+        <div class="timeline-list">
+            <div>
+                <span>1</span>
+                <p><strong>Upišeš korisničko ime i lozinku.</strong><br>To je prvi, klasični dio prijave.</p>
+            </div>
+            <div>
+                <span>2</span>
+                <p><strong>MyNotes prikaže jednu od enrollment fraza.</strong><br>Fraza se bira nasumično, pa ne mora uvijek biti ista.</p>
+            </div>
+            <div>
+                <span>3</span>
+                <p><strong>Prepišeš frazu normalnim tempom.</strong><br>Sustav uspoređuje ritam tipkanja s tvojim spremljenim profilom.</p>
+            </div>
+            <div>
+                <span>4</span>
+                <p><strong>Ako je profil dovoljno sličan, ulaziš u bilješke.</strong><br>Ako pokušaj ne prođe, dobit ćeš drugu frazu i možeš pokušati ponovno.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card complete-card">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Tvoj profil tipkanja</p>
+                <h2>Sažetak enrollment statistike</h2>
+                <p class="muted">Ovo je statistika očišćenih fixed-text značajki koje se koriste za demonstracijski model. Raw podaci i dalje čuvaju sve tipke, ali Backspace i korekcije nisu dio fixed-text usporedbe.</p>
+            </div>
+        </div>
+        <div class="stats-table-wrap complete-table-wrap">
+            <table class="stats-table">
+                <thead>
+                    <tr>
+                        <th>Značajka</th>
+                        <th>Prosjek</th>
+                        <th>Std</th>
+                        <th>Min</th>
+                        <th>Max</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for name in stats.feature_names %}
+                        {% set row = stats.overall_summary.get(name, {}) %}
+                        <tr>
+                            <td><strong>{{ feature_labels.get(name, name) }}</strong><small>{{ name }}</small></td>
+                            <td>{{ "%.3f"|format(row.get("avg", 0)) }}</td>
+                            <td>{{ "%.3f"|format(row.get("std", 0)) }}</td>
+                            <td>{{ "%.3f"|format(row.get("min", 0)) }}</td>
+                            <td>{{ "%.3f"|format(row.get("max", 0)) }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card complete-card final-instruction">
+        <h2>Važno</h2>
+        <p class="muted">Dinamika tipkanja nije zamjena za lozinku, nego dodatni sigurnosni signal. Zato se nakon lozinke radi još jedan kratki biometrijski korak. Piši normalno, bez copy/paste, jednako kao tijekom enrollmenta.</p>
+        <form method="post" action="{{ url_for('register_finish') }}">
+            <button class="button" type="submit">OK, razumijem</button>
+        </form>
+    </div>
+</section>
+{% endblock %}
