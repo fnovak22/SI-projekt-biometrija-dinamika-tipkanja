@@ -10,6 +10,8 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from ml.fixed_text_model import train_fixed_model, verify_fixed_typing
+
 # --- setup ---
 db = SQLAlchemy()
 
@@ -204,17 +206,6 @@ def validate_typing_payload(data):
 
     return prompt_id, prompt_text, typed_text, events, None
 
-
-# Privremeni placeholder dok tim za model ne spoji stvarni SVM.
-def verify_typing_with_model_stub(user, features, prompt_id):
-    return {
-        "accepted": True,
-        "score": None,
-        "model_status": "placeholder_no_model_yet",
-        "message": "Model još nije spojen, pa prototip trenutno propušta ispravno prepisan tekst.",
-    }
-
-
 # --- app factory ---
 def create_app():
     app = Flask(__name__)
@@ -337,9 +328,16 @@ def create_app():
         sample, features = save_typing_sample(user, "enroll", prompt_id, prompt_text, typed_text, events)
         count += 1
         complete = count >= REQUIRED_ENROLLMENT_SAMPLES
+        train_result = None
+
         if complete:
             user.enrollment_complete = True
             db.session.commit()
+
+            train_result = train_fixed_model(
+                user.id,
+                TypingSample
+            )
 
         return jsonify({
             "ok": True,
@@ -348,6 +346,7 @@ def create_app():
             "saved_count": count,
             "required_samples": REQUIRED_ENROLLMENT_SAMPLES,
             "complete": complete,
+            "train_result": train_result if complete else None
         })
 
     @app.get("/register/complete")
@@ -407,7 +406,10 @@ def create_app():
             return jsonify({"ok": False, "error": error_name}), status_code
 
         sample, features = save_typing_sample(user, "verify_attempt", prompt_id, prompt_text, typed_text, events)
-        model_result = verify_typing_with_model_stub(user, features, prompt_id)
+        model_result = verify_fixed_typing(
+            user.id,
+            features
+        )
 
         if model_result["accepted"]:
             session.clear()

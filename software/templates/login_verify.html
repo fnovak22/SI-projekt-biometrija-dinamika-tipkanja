@@ -5,11 +5,11 @@
     <div class="card collect-card">
         <p class="eyebrow">2. korak prijave za {{ username }}</p>
         <h1>Prepiši frazu za provjeru identiteta</h1>
-        <p class="muted">Ovo je mjesto gdje će se kasnije pozvati SVM model. Za sada se uzorak sprema kao <code>verify_attempt</code> i propušta korisnika ako je tekst točno prepisan.</p>
+        <p class="muted">Sustav sprema pokušaj kao <code>verify_attempt</code> i provjerava dinamiku tipkanja pomoću fixed-text One-Class SVM modela.</p>
 
         <div class="model-placeholder">
             <strong>Model status:</strong>
-            <span>placeholder — SVM još nije spojen</span>
+            <span>fixed-text One-Class SVM model spojen</span>
         </div>
 
         <div class="prompt-box" id="promptText">{{ prompt.text }}</div>
@@ -113,7 +113,7 @@
         }
 
         verifyBtn.disabled = true;
-        setStatus("Spremam pokušaj i pozivam placeholder model...", "info");
+        setStatus("Spremam pokušaj i provjeravam dinamiku tipkanja...", "info");
 
         try {
             const res = await fetch("{{ url_for('api_login_verify') }}", {
