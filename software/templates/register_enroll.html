@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Enrollment | KeyStroke ID{% endblock %}
+{% block content %}
+<section class="collect-layout">
+    <div class="card collect-card">
+        <p class="eyebrow">2. Enrollment za {{ username }}</p>
+        <h1>Prepiši svih {{ required_samples }} fraza za završetak registracije</h1>
+        <p class="muted">Piši normalnim tempom, bez copy/paste. Ako pogriješiš, ispravi tekst ili klikni “Ponovi trenutni uzorak”.</p>
+
+        <div class="progress-shell" aria-label="Napredak registracije">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="typing-meta">
+            <span>Registracija: <strong id="sampleProgress">{{ saved_count }}/{{ required_samples }}</strong></span>
+            <span>Prompt: <strong id="promptMeta">-</strong></span>
+            <span>Status: <strong id="matchText">čeka unos</strong></span>
+        </div>
+
+        <div class="prompt-box" id="promptText"></div>
+
+        <label for="typingBox">Prepiši ovdje</label>
+        <textarea id="typingBox" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Klikni ovdje i prepiši frazu..."></textarea>
+
+        <div class="actions">
+            <button class="button" id="saveBtn" type="button">Spremi uzorak</button>
+            <button class="button secondary" id="resetBtn" type="button">Ponovi trenutni uzorak</button>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <aside class="card side-card">
+        <h2>Zašto 5 × 4?</h2>
+        <p class="muted">Umjesto 20 potpuno različitih rečenica, koristi se 5 fiksnih fraza ponovljenih 4 puta. Tako model dobiva više usporedivih uzoraka za isti tekst.</p>
+        <ul class="feature-list compact" id="promptList"></ul>
+    </aside>
+</section>
+
+<script>
+    const sequence = {{ sequence|tojson }};
+    const requiredSamples = {{ required_samples }};
+    let savedCount = {{ saved_count }};
+    let events = [];
+    let startedAt = null;
+
+    const promptText = document.getElementById("promptText");
+    const typingBox = document.getElementById("typingBox");
+    const statusBox = document.getElementById("status");
+    const saveBtn = document.getElementById("saveBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const sampleProgress = document.getElementById("sampleProgress");
+    const promptMeta = document.getElementById("promptMeta");
+    const matchText = document.getElementById("matchText");
+    const progressBar = document.getElementById("progressBar");
+    const promptList = document.getElementById("promptList");
+
+    function nowRelative() {
+        const n = performance.now();
+        if (startedAt === null) startedAt = n;
+        return +(n - startedAt).toFixed(3);
+    }
+
+    function currentPrompt() {
+        return sequence[Math.min(savedCount, sequence.length - 1)];
+    }
+
+    function setStatus(message, type = "") {
+        statusBox.textContent = message;
+        statusBox.className = "status " + type;
+    }
+
+    function renderPromptList() {
+        const seen = [];
+        for (const item of sequence) {
+            if (!seen.find(x => x.id === item.id)) seen.push(item);
+        }
+        promptList.innerHTML = seen.map(item => `<li><strong>${item.id}</strong><span>${item.text}</span></li>`).join("");
+    }
+
+    function updateProgress() {
+        const pct = Math.round((savedCount / requiredSamples) * 100);
+        progressBar.style.width = pct + "%";
+        sampleProgress.textContent = `${savedCount}/${requiredSamples}`;
+
+        const item = currentPrompt();
+        if (savedCount >= requiredSamples) {
+            matchText.textContent = "gotovo";
+            promptMeta.textContent = "završeno";
+            return;
+        }
+
+        const typed = typingBox.value;
+        promptMeta.textContent = `${item.id}, ponavljanje ${item.repeat}/4`;
+
+        if (!typed.length) {
+            matchText.textContent = "čeka unos";
+            matchText.className = "";
+            return;
+        }
+        if (item.text.startsWith(typed)) {
+            matchText.textContent = typed === item.text ? "točno" : `${typed.length}/${item.text.length}`;
+            matchText.className = "good";
+        } else {
+            matchText.textContent = "greška u tekstu";
+            matchText.className = "bad";
+        }
+    }
+
+    function loadPrompt() {
+        if (savedCount >= requiredSamples) {
+            promptText.textContent = "Enrollment je završen. Preusmjeravam na prijavu...";
+            typingBox.disabled = true;
+            saveBtn.disabled = true;
+            resetBtn.disabled = true;
+            setStatus("Registracija je dovršena.", "good");
+            window.location.href = "{{ url_for('register_complete') }}";
+            return;
+        }
+
+        const item = currentPrompt();
+        promptText.textContent = item.text;
+        typingBox.value = "";
+        typingBox.disabled = false;
+        events = [];
+        startedAt = null;
+        saveBtn.disabled = false;
+        setStatus("Klikni u polje i prepiši prikazanu frazu.");
+        updateProgress();
+        setTimeout(() => typingBox.focus(), 50);
+    }
+
+    function recordEvent(e) {
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        events.push({
+            type: e.type,
+            key: e.key,
+            code: e.code,
+            t: nowRelative(),
+            repeat: e.repeat,
+            shiftKey: e.shiftKey,
+            inputLength: typingBox.value.length
+        });
+    }
+
+    typingBox.addEventListener("keydown", recordEvent);
+    typingBox.addEventListener("keyup", recordEvent);
+    typingBox.addEventListener("input", updateProgress);
+    resetBtn.addEventListener("click", loadPrompt);
+
+    saveBtn.addEventListener("click", async () => {
+        const item = currentPrompt();
+        const typed = typingBox.value.trim();
+
+        if (typed !== item.text) {
+            setStatus("Tekst se ne poklapa s frazom. Ispravi grešku ili klikni Ponovi.", "bad");
+            return;
+        }
+        if (events.length < 10) {
+            setStatus("Premalo događaja tipkovnice. Nemoj lijepiti tekst, nego ga prepiši ručno.", "bad");
+            return;
+        }
+
+        saveBtn.disabled = true;
+        setStatus("Spremam uzorak...", "info");
+
+        try {
+            const res = await fetch("{{ url_for('api_registration_sample') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt_id: item.id,
+                    prompt_text: item.text,
+                    typed_text: typed,
+                    events: events
+                })
+            });
+            const data = await res.json();
+
+            if (!res.ok || !data.ok) {
+                setStatus("Greška kod spremanja uzorka: " + (data.error || "nepoznata greška"), "bad");
+                saveBtn.disabled = false;
+                return;
+            }
+
+            savedCount = data.saved_count;
+            updateProgress();
+            setStatus(`Uzorak #${data.sample_id} spremljen. Dwell avg: ${data.features.avg_dwell_ms} ms, DD avg: ${data.features.avg_dd_interval_ms} ms.`, "good");
+            setTimeout(loadPrompt, 650);
+        } catch (err) {
+            setStatus("Greška: server nije odgovorio. Provjeri je li Flask aplikacija pokrenuta.", "bad");
+            saveBtn.disabled = false;
+        }
+    });
+
+    renderPromptList();
+    loadPrompt();
+</script>
+{% endblock %}

@@ -1,0 +1,1 @@
+# empty - to je standardna phyton struktura, ne brisati da ne bi doslo do errora nekog :) 

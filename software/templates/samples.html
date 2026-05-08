@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Spremljeni uzorci | KeyStroke ID{% endblock %}
+{% block content %}
+<section class="card">
+    <div class="section-head">
+        <div>
+            <p class="eyebrow">Provjera podataka</p>
+            <h1>Spremljeni uzorci</h1>
+            <p class="muted">Ovdje vidiš zadnjih 50 uzoraka trenutno prijavljenog korisnika. CSV export sadrži uzorke svih korisnika.</p>
+        </div>
+        <a class="button" href="{{ url_for('export_typing_samples_csv') }}">Preuzmi CSV za ML tim</a>
+    </div>
+
+    {% if rows %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Tip</th>
+                        <th>Prompt</th>
+                        <th>Korisnik</th>
+                        <th>Vrijeme</th>
+                        <th>Trajanje</th>
+                        <th>Tipke</th>
+                        <th>Backspace</th>
+                        <th>Avg dwell</th>
+                        <th>Avg DD</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>#{{ row.sample.id }}</td>
+                            <td><span class="sample-chip">{{ row.sample.sample_type }}</span></td>
+                            <td>{{ row.sample.prompt_id or '-' }}</td>
+                            <td>{{ row.sample.username }}</td>
+                            <td>{{ row.sample.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td>{{ row.features.duration_ms }} ms</td>
+                            <td>{{ row.features.keydown_count }}</td>
+                            <td>{{ row.features.backspace_count }}</td>
+                            <td>{{ row.features.avg_dwell_ms }} ms</td>
+                            <td>{{ row.features.avg_dd_interval_ms }} ms</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <h2>Još nema uzoraka</h2>
+            <p class="muted">Ako si upravo napravio račun, obavezni enrollment uzorci će se vidjeti nakon prve uspješne prijave.</p>
+            <a class="button" href="{{ url_for('collect') }}">Prikupi dodatni uzorak</a>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}
