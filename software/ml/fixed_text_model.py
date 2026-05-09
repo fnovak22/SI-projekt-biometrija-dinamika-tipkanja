@@ -8,6 +8,7 @@ from sklearn.svm import OneClassSVM
 
 from ml.feature_extractor import features_to_vector_fixed
 
+FIXED_TEXT_ACCEPTANCE_MARGIN = -0.25
 
 def get_models_dir():
     base_dir = os.path.abspath(
@@ -55,7 +56,7 @@ def train_fixed_model(user_id, TypingSample):
             # prediction == 1, što odgovara scoreu decision_function >= 0.
             # nu=0.15 je okvirna gornja granica udjela trening outliera, nije
             # običan postotak dopuštenog odstupanja za svaki login pokušaj.
-            nu=0.15
+            nu=0.05
         ))
     ])
 
@@ -85,13 +86,15 @@ def verify_fixed_typing(user_id, features):
 
     prediction = model.predict([vector])[0]
     score = model.decision_function([vector])[0]
+    
+    accepted = bool(prediction == 1 or score >= FIXED_TEXT_ACCEPTANCE_MARGIN)
 
     return {
         "accepted": bool(prediction == 1),
         "score": float(score),
         "message": (
             "Autentifikacija uspješna."
-            if prediction == 1
+            if accepted
             else "Dinamika tipkanja ne odgovara korisniku."
         )
     }
