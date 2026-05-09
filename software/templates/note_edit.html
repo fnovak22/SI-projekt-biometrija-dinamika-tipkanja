@@ -10,6 +10,10 @@
         <label for="title">Naslov</label>
         <input id="title" name="title" type="text" value="{{ note.title if note else '' }}" placeholder="Npr. Plan za projekt" autocomplete="off">
 
+        <div id="suspicious-counter" style="margin-top:10px; font-weight:bold;">
+            Sumnjivi uzorci zaredom: 0 / 3
+        </div>
+
         <label for="body">Tekst bilješke</label>
         <textarea id="body" name="body" class="note-body" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true" placeholder="Napiši svoju bilješku ovdje...">{{ note.body if note else '' }}</textarea>
 
@@ -47,7 +51,7 @@
     const bodyBox = document.getElementById("body");
     const typingStatus = document.getElementById("typingStatus");
     const freeTextCount = document.getElementById("freeTextCount");
-    const initialFreeTextReadiness = {{ free_text_readiness|tojson }};
+    const initialFreeTextReadiness = {{ free_text_readiness | tojson }};
     console.group("[MyNotes free-text] Spremnost za ML tim");
     console.log("Free-text readiness:", initialFreeTextReadiness);
     console.log("Feature extraction uključuje backspace_count za free-text uzorke.");
@@ -87,9 +91,9 @@
         if (segment.trim().length < 20 && force) {
             segment = bodyBox.value;
         }
-        const enoughText = segment.trim().length >= (force ? 20 : 80);
-        const enoughEvents = events.length >= (force ? 10 : 40);
-        const cooldownPassed = performance.now() - lastSentAt > 5000;
+        const enoughText = segment.trim().length >= (force ? 180 : 180);
+        const enoughEvents = events.length >= (force ? 50 : 50);
+        const cooldownPassed = performance.now() - lastSentAt > 4000;
         if (!enoughText || !enoughEvents || (!force && !cooldownPassed)) return false;
 
         const payload = { typed_text: segment, events: events };
@@ -105,11 +109,35 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
             });
+
             const data = await res.json();
+
+            if (typeof data.suspicious_count !== "undefined") {
+                const el = document.getElementById("suspicious-counter");
+                if (el) {
+                    el.textContent = `Sumnjivi uzorci zaredom: ${data.suspicious_count} / 3`;
+                }
+            }
+
+            if (data.mode === "training") {
+                setTypingStatus(data.message || "Free-text enrollment uzorak spremljen.", "info");
+            }
+
+            if (data.sample_type === "free_text_suspicious") {
+                alert("Detektirana promjena u načinu tipkanja. Sumnjivi uzorci zaredom: " + data.suspicious_count);
+            }
+
+            if (data.logout_required) {
+                alert(data.message || "Zbog sumnjive dinamike tipkanja bit ćete odjavljeni.");
+                window.location.href = data.redirect_url || "{{ url_for('login') }}";
+                return false;
+            }
+           
             if (!res.ok || !data.ok) {
                 setTypingStatus("Free-text prozor nije spremljen: " + (data.error || "nepoznata greška"), "bad");
                 return false;
             }
+
             console.group(`[MyNotes free-text] Spremljen uzorak #${data.sample_id}`);
             console.log("Featurei free-text uzorka:", data.features);
             console.log("Free-text readiness:", data.free_text_readiness);

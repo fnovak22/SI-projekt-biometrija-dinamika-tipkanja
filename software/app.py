@@ -19,6 +19,13 @@ from ml.feature_extractor import (
     features_to_vector_fixed,
 )
 
+from ml.free_text_model import (
+    REQUIRED_FREE_TEXT_ENROLL_SAMPLES,
+    free_text_model_exists,
+    train_free_text_model,
+    verify_free_text_typing,
+)
+
 # --- setup ---
 db = SQLAlchemy()
 
@@ -775,18 +782,186 @@ def create_app():
         db.session.commit()
         flash("Bilješka je obrisana.", "info")
         return redirect(url_for("index"))
+    
+    def is_free_text_rule_suspicious(user_id, current_features):
+        enroll_samples = TypingSample.query.filter_by(
+            user_id=user_id,
+            sample_type="free_text_enroll"
+        ).all()
 
+        if len(enroll_samples) < 3:
+            return False, {}
+
+        speeds = []
+        intervals = []
+        pauses = []
+        backspaces = []
+
+        for sample in enroll_samples:
+            features = json.loads(sample.features_json)
+            speeds.append(float(features.get("typing_speed_chars_per_sec", 0)))
+            intervals.append(float(features.get("avg_dd_interval_ms", 0)))
+            pauses.append(float(features.get("pause_ratio", 0)))
+            backspaces.append(float(features.get("backspace_count", 0)))
+
+        avg_speed = sum(speeds) / len(speeds)
+        avg_interval = sum(intervals) / len(intervals)
+        avg_pause = sum(pauses) / len(pauses)
+        avg_backspace = sum(backspaces) / len(backspaces)
+
+        current_speed = float(current_features.get("typing_speed_chars_per_sec", 0))
+        current_interval = float(current_features.get("avg_dd_interval_ms", 0))
+        current_pause = float(current_features.get("pause_ratio", 0))
+        current_backspace = float(current_features.get("backspace_count", 0))
+
+        suspicious = (
+            current_speed < avg_speed * 0.65 or
+            current_speed > avg_speed * 1.60 or
+            current_interval > avg_interval * 1.60 or
+            current_pause > avg_pause + 0.20 or
+            current_backspace > avg_backspace + 3
+        )
+
+        details = {
+            "avg_speed": avg_speed,
+            "current_speed": current_speed,
+            "avg_interval": avg_interval,
+            "current_interval": current_interval,
+            "avg_pause": avg_pause,
+            "current_pause": current_pause,
+            "avg_backspace": avg_backspace,
+            "current_backspace": current_backspace,
+        }
+
+        return suspicious, details
+    
     @app.post("/api/notes/typing-window")
     @login_required
     def api_note_typing_window():
         data = request.get_json(silent=True) or {}
         typed_text, events, error = validate_free_text_payload(data)
+
         if error:
             error_name, status_code = error
             return jsonify({"ok": False, "error": error_name}), status_code
+
         user = User.query.get_or_404(session["user_id"])
-        sample, features = save_typing_sample(user, "free_text_note", "free_text", "Slobodni tekst iz bilješke", typed_text, events)
-        return jsonify({"ok": True, "sample_id": sample.id, "features": features, "free_text_readiness": summarize_free_text_readiness(user.id)})
+
+        enroll_count = TypingSample.query.filter_by(
+            user_id=user.id,
+            sample_type="free_text_enroll"
+        ).count()
+
+        model_exists = free_text_model_exists(user.id)
+
+        # 1) PRVI DUGI FREE-TEXT UNOS: skuplja enrollment uzorke
+        if not model_exists and enroll_count < REQUIRED_FREE_TEXT_ENROLL_SAMPLES:
+            sample, features = save_typing_sample(
+                user,
+                "free_text_enroll",
+                "free_text",
+                "Prvi slobodni tekst za treniranje free-text modela",
+                typed_text,
+                events
+            )
+
+            train_result = train_free_text_model(user.id, TypingSample)
+
+            return jsonify({
+                "ok": True,
+                "mode": "training",
+                "sample_id": sample.id,
+                "sample_type": sample.sample_type,
+                "features": features,
+                "train_result": train_result,
+                "suspicious_count": 0,
+                "logout_required": False,
+                "message": "Free-text enrollment uzorak je spremljen."
+            })
+
+        # 2) AKO MODEL JOŠ NIJE NASTAO, pokušaj ga istrenirati
+        if not model_exists:
+            train_result = train_free_text_model(user.id, TypingSample)
+            model_exists = free_text_model_exists(user.id)
+
+            if not model_exists:
+                sample, features = save_typing_sample(
+                    user,
+                    "free_text_enroll",
+                    "free_text",
+                    "Dodatni slobodni tekst za treniranje free-text modela",
+                    typed_text,
+                    events
+                )
+
+                return jsonify({
+                    "ok": True,
+                    "mode": "training",
+                    "sample_id": sample.id,
+                    "sample_type": sample.sample_type,
+                    "features": features,
+                    "train_result": train_result,
+                    "suspicious_count": 0,
+                    "logout_required": False,
+                    "message": "Model još nije spreman za provjeru."
+                })
+
+        # 3) SVAKI SLJEDEĆI FREE-TEXT UNOS: provjera
+        sample, features = save_typing_sample(
+            user,
+            "free_text_check",
+            "free_text",
+            "Slobodni tekst za tihu provjeru korisnika",
+            typed_text,
+            events
+        )
+
+        verify_result = verify_free_text_typing(user.id, features)
+        
+        rule_suspicious, rule_details = is_free_text_rule_suspicious(user.id, features)
+
+        if rule_suspicious:
+            verify_result["accepted"] = False
+            verify_result["message"] = "Detektirana promjena u načinu tipkanja prema pravilima."
+            verify_result["rule_details"] = rule_details
+
+        suspicious_count = session.get("free_text_suspicious_count", 0)
+        logout_required = False
+
+        if verify_result["accepted"] is True:
+            sample.sample_type = "free_text_verified"
+            suspicious_count = 0
+
+        elif verify_result["accepted"] is False:
+            suspicious_count += 1
+
+            if suspicious_count >= 2:
+                sample.sample_type = "free_text_logout_triggered"
+                logout_required = True
+            else:
+                sample.sample_type = "free_text_suspicious"
+
+        session["free_text_suspicious_count"] = suspicious_count
+        db.session.commit()
+
+        response = {
+            "ok": True,
+            "mode": "verification",
+            "sample_id": sample.id,
+            "sample_type": sample.sample_type,
+            "features": features,
+            "verify_result": verify_result,
+            "suspicious_count": suspicious_count,
+            "logout_required": logout_required,
+            "message": verify_result.get("message")
+        }
+
+        if logout_required:
+            session.clear()
+            response["redirect_url"] = url_for("login")
+            response["message"] = "Tri puta zaredom je detektirana promjena u načinu tipkanja. Korisnik je odjavljen."
+
+        return jsonify(response)
 
     @app.get("/collect")
     @login_required

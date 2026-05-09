@@ -298,3 +298,18 @@ def features_to_vector_fixed(features):
         typing_speed or 0.0,
         pause_ratio or 0.0,
     ]
+    
+def features_to_vector_free(features):
+    return [
+        float(features.get("duration_ms", 0.0)),
+        float(features.get("keydown_count", 0.0)),
+        float(features.get("keyup_count", 0.0)),
+        float(features.get("char_count", 0.0)),
+        float(features.get("backspace_count", 0.0)),
+        float(features.get("avg_dwell_ms", 0.0)),
+        float(features.get("avg_dd_interval_ms", 0.0)),
+        float(features.get("std_dwell_ms", 0.0)),
+        float(features.get("std_dd_interval_ms", 0.0)),
+        float(features.get("typing_speed_chars_per_sec", 0.0)),
+        float(features.get("pause_ratio", 0.0)),
+    ]
