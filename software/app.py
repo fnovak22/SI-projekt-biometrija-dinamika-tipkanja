@@ -18,9 +18,12 @@ from ml.feature_extractor import (
     attach_fixed_text_features,
     extract_features as extract_raw_features,
     features_to_vector_fixed,
+    features_to_vector_free,
 )
 
 from ml.free_text_model import (
+    FREE_TEXT_ACCEPTANCE_MARGIN,
+    MAX_FREE_TEXT_TRAINING_SAMPLES,
     REQUIRED_FREE_TEXT_ENROLL_SAMPLES,
     free_text_model_exists,
     train_free_text_model,
@@ -467,8 +470,24 @@ def summarize_free_text_readiness(user_id):
         user_id=user_id,
         sample_type="free_text_enroll"
     ).count()
+
+    # Ako aplikacija ima spremljenih dovoljno početnih uzoraka, ali model file
+    # ne postoji (npr. nakon kopiranja baze, brisanja instance/models ili novog
+    # pokretanja projekta), odmah ga obnovi. Tako UI ne zapne u fazi
+    # "Prikupljanje početnih uzoraka" iako korisnik već ima 5+ uzoraka.
     model_ready = free_text_model_exists(user_id)
+    model_rebuilt = False
+    if not model_ready and training_count >= REQUIRED_FREE_TEXT_ENROLL_SAMPLES:
+        train_result = train_free_text_model(user_id, TypingSample)
+        model_ready = free_text_model_exists(user_id)
+        model_rebuilt = bool(train_result.get("success"))
+
     remaining_training = max(REQUIRED_FREE_TEXT_ENROLL_SAMPLES - training_count, 0)
+    adaptive_count = TypingSample.query.filter_by(
+        user_id=user_id,
+        sample_type="free_text_verified"
+    ).count()
+    training_window_count = min(training_count + adaptive_count, MAX_FREE_TEXT_TRAINING_SAMPLES)
     if model_ready:
         phase = "verification"
         phase_label = "Model je spreman za provjeru"
@@ -481,16 +500,206 @@ def summarize_free_text_readiness(user_id):
         "training_count": training_count,
         "required_training_samples": REQUIRED_FREE_TEXT_ENROLL_SAMPLES,
         "remaining_training_samples": remaining_training,
+        "adaptive_sample_count": adaptive_count,
+        "training_window_count": training_window_count,
+        "max_training_samples": MAX_FREE_TEXT_TRAINING_SAMPLES,
         "model_ready": model_ready,
+        "model_rebuilt": model_rebuilt,
         "phase": phase,
         "phase_label": phase_label,
         "stored_fields": ["typed_text", "events_json", "features_json", "created_at", "user_id"],
         "features_include": [
-            "duration_ms", "keydown_count", "keyup_count", "char_count", "backspace_count",
             "avg_dwell_ms", "avg_dd_interval_ms", "std_dwell_ms", "std_dd_interval_ms",
-            "typing_speed_chars_per_sec", "pause_ratio", "dwell_times_ms", "dd_intervals_ms"
+            "typing_speed_chars_per_sec", "pause_ratio", "correction_ratio"
         ],
         "recent_sample_ids": [s.id for s in samples],
+    }
+
+
+FREE_TEXT_FEATURES_FOR_UI = [
+    ("avg_dwell_ms", "Vrijeme držanja tipke (ms)"),
+    ("avg_dd_interval_ms", "Razmak između pritisaka (ms)"),
+    ("std_dwell_ms", "Std vremena držanja tipke"),
+    ("std_dd_interval_ms", "Std razmaka između pritisaka"),
+    ("typing_speed_chars_per_sec", "Brzina tipkanja (znakova/s)"),
+    ("pause_ratio", "Udio dužih pauza"),
+    ("correction_ratio", "Udio brisanja"),
+]
+
+
+def normalized_free_feature_map(features):
+    vector = features_to_vector_free(features or {})
+    return {name: vector[index] for index, (name, _label) in enumerate(FREE_TEXT_FEATURES_FOR_UI)}
+
+
+def _format_dev_number(value):
+    if not isinstance(value, (int, float)):
+        return "—"
+    value = float(value)
+    if abs(value) >= 100:
+        return f"{value:.1f}"
+    if abs(value) >= 10:
+        return f"{value:.2f}"
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def summarize_free_text_profile(user_id, current_features=None, verify_result=None, mode="training"):
+    """Development sažetak za free-text.
+
+    U fazi početnog treniranja nema usporedbe s profilom jer profil još ne postoji.
+    Nakon što model postoji, prikazuje se zadnji uzorak u odnosu na prosjek i std
+    početnih free-text uzoraka. Prikazuju se samo značajke iz features_to_vector_free.
+    """
+    training_samples = TypingSample.query.filter(
+        TypingSample.user_id == user_id,
+        TypingSample.sample_type.in_(["free_text_enroll", "free_text_verified"])
+    ).order_by(TypingSample.created_at.desc()).limit(MAX_FREE_TEXT_TRAINING_SAMPLES).all()
+    training_samples = list(reversed(training_samples))
+
+    enroll_count = TypingSample.query.filter_by(
+        user_id=user_id,
+        sample_type="free_text_enroll"
+    ).count()
+
+    # Ako se development panel otvara bez novog trenutnog uzorka, prikaži
+    # zadnji spremljeni free-text uzorak. Ako je zadnji uzorak još uvijek jedan
+    # od početnih 5 enrollment uzoraka, prikaz ostaje u "početnom" načinu bez
+    # zeleno/žute/crvene procjene. Obojana usporedba ima smisla tek od prvog
+    # provjernog uzorka nakon izrade profila.
+    latest_sample_type = None
+    if current_features is None:
+        latest_sample = TypingSample.query.filter(
+            TypingSample.user_id == user_id,
+            TypingSample.sample_type.like("free_text%")
+        ).order_by(TypingSample.created_at.desc()).first()
+        if latest_sample:
+            latest_sample_type = latest_sample.sample_type
+        if latest_sample and latest_sample.features_json:
+            current_features = json.loads(latest_sample.features_json)
+    elif mode == "verification":
+        latest_sample_type = "free_text_check"
+    else:
+        latest_sample_type = "free_text_enroll"
+
+    model_ready = free_text_model_exists(user_id)
+    if not model_ready and enroll_count >= REQUIRED_FREE_TEXT_ENROLL_SAMPLES:
+        train_result = train_free_text_model(user_id, TypingSample)
+        model_ready = free_text_model_exists(user_id)
+
+    rows = []
+    has_verification_sample = latest_sample_type in {
+        "free_text_check", "free_text_verified", "free_text_suspicious", "free_text_logout_triggered"
+    }
+    profile_ready = (
+        model_ready and
+        enroll_count >= REQUIRED_FREE_TEXT_ENROLL_SAMPLES and
+        has_verification_sample and
+        mode != "training"
+    )
+
+    profile_values = {name: [] for name, _label in FREE_TEXT_FEATURES_FOR_UI}
+    for sample in training_samples:
+        features = normalized_free_feature_map(json.loads(sample.features_json))
+        for name, _label in FREE_TEXT_FEATURES_FOR_UI:
+            value = features.get(name)
+            if isinstance(value, (int, float)):
+                profile_values[name].append(float(value))
+
+    for name, label in FREE_TEXT_FEATURES_FOR_UI:
+        current = None
+        if current_features:
+            normalized_current = normalized_free_feature_map(current_features)
+            value = normalized_current.get(name)
+            if isinstance(value, (int, float)):
+                current = float(value)
+
+        values = profile_values.get(name, [])
+        profile_avg = _avg(values) if values else None
+        profile_std = _std(values) if values else None
+        diff = None
+        z_score = None
+        level = "neutral"
+        assessment = "Profil još ne postoji"
+
+        if profile_ready and current is not None and isinstance(profile_avg, (int, float)):
+            diff = current - float(profile_avg)
+            if isinstance(profile_std, (int, float)) and profile_std > 0:
+                z_score = abs(diff) / float(profile_std)
+                if z_score <= 1.25:
+                    level = "good"
+                    assessment = f"Dobro se podudara · z={z_score:.2f}"
+                elif z_score <= 2.5:
+                    level = "warn"
+                    assessment = f"Rubno odstupanje · z={z_score:.2f}"
+                else:
+                    level = "bad"
+                    assessment = f"Veće odstupanje · z={z_score:.2f}"
+            else:
+                if abs(diff) < 0.001:
+                    level = "good"
+                    assessment = "Dobro se podudara"
+                else:
+                    level = "warn"
+                    assessment = "Profil nema dovoljno varijacije"
+        elif current is not None:
+            if model_ready and enroll_count >= REQUIRED_FREE_TEXT_ENROLL_SAMPLES:
+                assessment = "Profil je izrađen; sljedeći duži uzorak bit će provjeren"
+            else:
+                assessment = "Spremljeno za početno treniranje"
+
+        rows.append({
+            "key": name,
+            "label": label,
+            "current": _format_dev_number(current) if current is not None else "—",
+            "profile": _format_dev_number(profile_avg) if profile_ready else "—",
+            "profile_std": _format_dev_number(profile_std) if profile_ready else "—",
+            "diff": _format_dev_number(diff) if diff is not None else "—",
+            "assessment": assessment,
+            "level": level,
+        })
+
+    score = verify_result.get("score") if isinstance(verify_result, dict) else None
+    has_score = isinstance(score, (int, float))
+    margin = verify_result.get("acceptance_margin", FREE_TEXT_ACCEPTANCE_MARGIN) if isinstance(verify_result, dict) else FREE_TEXT_ACCEPTANCE_MARGIN
+    score_delta = verify_result.get("score_delta_to_margin") if isinstance(verify_result, dict) else None
+    if score_delta is None and isinstance(score, (int, float)) and isinstance(margin, (int, float)):
+        score_delta = float(score) - float(margin)
+
+    score_delta_level = "neutral"
+    accepted = verify_result.get("accepted") if isinstance(verify_result, dict) else None
+    near_margin = isinstance(score_delta, (int, float)) and -0.02 <= float(score_delta) < 0
+    if profile_ready and isinstance(score_delta, (int, float)):
+        if accepted is True or float(score_delta) >= 0:
+            score_delta_level = "good"
+        elif near_margin:
+            score_delta_level = "warn"
+        else:
+            score_delta_level = "bad"
+
+    if profile_ready:
+        title = "Statistika zadnjeg free-text uzorka"
+        description = "Zadnji dulji odlomak uspoređen je s free-text profilom. Profil se nakon početnih 5 uzoraka prilagođava samo prihvaćenim uzorcima. Razlika od granice = score - granica; pozitivna vrijednost znači prolaz."
+    elif model_ready and enroll_count >= REQUIRED_FREE_TEXT_ENROLL_SAMPLES:
+        title = "Početni free-text profil je spreman"
+        description = "Prvih 5 uzoraka je spremljeno i profil je izrađen. Obojana usporedba prikazat će se od sljedećeg duljeg uzorka, jer se tek tada novi uzorak uspoređuje s gotovim profilom."
+    else:
+        title = "Zadnji početni free-text uzorak"
+        description = "Profil još nije izrađen, zato nema procjene podudaranja. Ove vrijednosti se spremaju za početno treniranje modela."
+
+    return {
+        "profile_ready": profile_ready,
+        "mode": "verification" if profile_ready else "training",
+        "title": title,
+        "description": description,
+        "rows": rows,
+        "score": _format_dev_number(score) if isinstance(score, (int, float)) else "—",
+        "acceptance_margin": _format_dev_number(margin) if isinstance(margin, (int, float)) else "—",
+        "score_delta_to_margin": _format_dev_number(score_delta) if isinstance(score_delta, (int, float)) else "—",
+        "has_score": has_score,
+        "score_delta_level": score_delta_level,
+        "score_delta_help": "score - granica",
+        "accepted": accepted,
+        "prediction": verify_result.get("prediction") if isinstance(verify_result, dict) else None,
     }
 
 
@@ -941,6 +1150,10 @@ def create_app():
             "note_edit.html",
             note=None,
             free_text_readiness=summarize_free_text_readiness(session.get("user_id", 0)) if session.get("user_id") else None,
+            free_text_profile=summarize_free_text_profile(
+                session.get("user_id", 0),
+                mode="verification" if session.get("user_id") and free_text_model_exists(session.get("user_id")) else "training"
+            ) if session.get("user_id") else None,
             suspicious_count=session.get("free_text_suspicious_count", 0),
         )
 
@@ -959,6 +1172,10 @@ def create_app():
             "note_edit.html",
             note=note,
             free_text_readiness=summarize_free_text_readiness(session["user_id"]),
+            free_text_profile=summarize_free_text_profile(
+                session["user_id"],
+                mode="verification" if free_text_model_exists(session["user_id"]) else "training"
+            ),
             suspicious_count=session.get("free_text_suspicious_count", 0),
         )
 
@@ -983,31 +1200,32 @@ def create_app():
         speeds = []
         intervals = []
         pauses = []
-        backspaces = []
+        correction_ratios = []
 
         for sample in enroll_samples:
-            features = json.loads(sample.features_json)
+            features = normalized_free_feature_map(json.loads(sample.features_json))
             speeds.append(float(features.get("typing_speed_chars_per_sec", 0)))
             intervals.append(float(features.get("avg_dd_interval_ms", 0)))
             pauses.append(float(features.get("pause_ratio", 0)))
-            backspaces.append(float(features.get("backspace_count", 0)))
+            correction_ratios.append(float(features.get("correction_ratio", 0)))
 
         avg_speed = sum(speeds) / len(speeds)
         avg_interval = sum(intervals) / len(intervals)
         avg_pause = sum(pauses) / len(pauses)
-        avg_backspace = sum(backspaces) / len(backspaces)
+        avg_correction_ratio = sum(correction_ratios) / len(correction_ratios)
 
-        current_speed = float(current_features.get("typing_speed_chars_per_sec", 0))
-        current_interval = float(current_features.get("avg_dd_interval_ms", 0))
-        current_pause = float(current_features.get("pause_ratio", 0))
-        current_backspace = float(current_features.get("backspace_count", 0))
+        current = normalized_free_feature_map(current_features)
+        current_speed = float(current.get("typing_speed_chars_per_sec", 0))
+        current_interval = float(current.get("avg_dd_interval_ms", 0))
+        current_pause = float(current.get("pause_ratio", 0))
+        current_correction_ratio = float(current.get("correction_ratio", 0))
 
         suspicious = (
             current_speed < avg_speed * 0.65 or
             current_speed > avg_speed * 1.60 or
             current_interval > avg_interval * 1.60 or
             current_pause > avg_pause + 0.20 or
-            current_backspace > avg_backspace + 3
+            current_correction_ratio > avg_correction_ratio + 0.08
         )
 
         details = {
@@ -1017,8 +1235,8 @@ def create_app():
             "current_interval": current_interval,
             "avg_pause": avg_pause,
             "current_pause": current_pause,
-            "avg_backspace": avg_backspace,
-            "current_backspace": current_backspace,
+            "avg_correction_ratio": avg_correction_ratio,
+            "current_correction_ratio": current_correction_ratio,
         }
 
         return suspicious, details
@@ -1065,6 +1283,7 @@ def create_app():
                 "suspicious_count": 0,
                 "logout_required": False,
                 "free_text_readiness": summarize_free_text_readiness(user.id),
+                "free_text_profile": summarize_free_text_profile(user.id, features, mode="training"),
                 "message": "Spremljen je početni free-text uzorak."
             })
 
@@ -1093,6 +1312,7 @@ def create_app():
                     "suspicious_count": 0,
                     "logout_required": False,
                     "free_text_readiness": summarize_free_text_readiness(user.id),
+                    "free_text_profile": summarize_free_text_profile(user.id, features, mode="training"),
                     "message": "Model još nije spreman za provjeru. Prikupljaju se početni uzorci."
                 })
 
@@ -1110,13 +1330,20 @@ def create_app():
         
         rule_suspicious, rule_details = is_free_text_rule_suspicious(user.id, features)
 
+        # Dodatna pravila ostaju samo development signal.
+        # Konačnu odluku donosi free-text model s marginom prihvaćanja,
+        # kako UI statistika ne bi pokazivala zeleno dok skriveno pravilo odjavljuje korisnika.
         if rule_suspicious:
-            verify_result["accepted"] = False
-            verify_result["message"] = "Detektirana promjena u načinu tipkanja prema pravilima."
+            verify_result["rule_warning"] = True
             verify_result["rule_details"] = rule_details
+        else:
+            verify_result["rule_warning"] = False
 
         suspicious_count = session.get("free_text_suspicious_count", 0)
         logout_required = False
+
+        profile_summary = summarize_free_text_profile(user.id, features, verify_result, mode="verification")
+        train_result = None
 
         if verify_result["accepted"] is True:
             sample.sample_type = "free_text_verified"
@@ -1134,6 +1361,9 @@ def create_app():
         session["free_text_suspicious_count"] = suspicious_count
         db.session.commit()
 
+        if verify_result["accepted"] is True:
+            train_result = train_free_text_model(user.id, TypingSample)
+
         response = {
             "ok": True,
             "mode": "verification",
@@ -1144,6 +1374,8 @@ def create_app():
             "suspicious_count": suspicious_count,
             "logout_required": logout_required,
             "free_text_readiness": summarize_free_text_readiness(user.id),
+            "free_text_profile": profile_summary,
+            "train_result": train_result,
             "message": verify_result.get("message")
         }
 
@@ -1171,7 +1403,7 @@ def create_app():
         sample_type = str(data.get("sample_type", "extra_enroll"))[:30]
         user = User.query.get_or_404(session["user_id"])
         sample, features = save_typing_sample(user, sample_type, prompt_id, prompt_text, typed_text, events)
-        return jsonify({"ok": True, "sample_id": sample.id, "features": features, "free_text_readiness": summarize_free_text_readiness(user.id)})
+        return jsonify({"ok": True, "sample_id": sample.id, "features": features, "free_text_readiness": summarize_free_text_readiness(user.id), "free_text_profile": summarize_free_text_profile(user.id, features)})
 
     @app.get("/samples")
     @login_required

@@ -37,14 +37,14 @@
             <div>
                 <p class="eyebrow">Development</p>
                 <h2>Free-text provjera tipkanja</h2>
-                <p class="muted">Privremeni prikaz za praćenje tihe provjere tijekom pisanja bilješki. Prvih 5 duljih uzoraka koristi se za početno treniranje free-text modela; tek nakon toga kreće tiha provjera.</p>
+                <p class="muted">Privremeni prikaz za praćenje tihe provjere tijekom pisanja bilješki. Prvih 5 duljih uzoraka koristi se za početno treniranje; nakon toga se profil prilagođava samo prihvaćenim uzorcima.</p>
             </div>
             {% if free_text_readiness %}
                 <div class="dev-training-callout" id="devTrainingCallout">
                     <strong id="devPhaseLabel">{{ free_text_readiness.phase_label }}</strong>
                     <span id="devPhaseHelp">
                         {% if free_text_readiness.model_ready %}
-                            Novi dulji odlomci koriste se za provjeru ritma tipkanja.
+                            Novi dulji odlomci koriste se za provjeru ritma tipkanja. Prihvaćeni uzorci se dodaju u profil, a sumnjivi se ne koriste za treniranje.
                         {% else %}
                             Potrebno je još {{ free_text_readiness.remaining_training_samples }} početnih uzoraka prije uključivanja provjere.
                         {% endif %}
@@ -54,11 +54,11 @@
             <div class="dev-metrics free-text-dev-metrics">
                 <div>
                     <span>Status</span>
-                    <strong id="devTypingStatus">Čeka dovoljno teksta za provjeru.</strong>
+                    <strong id="devTypingStatus">{% if free_text_readiness and free_text_readiness.model_ready %}Model spreman. Čeka novi dulji tekst za provjeru.{% else %}Čeka dovoljno teksta za početni uzorak.{% endif %}</strong>
                 </div>
                 <div>
                     <span>Sumnjivi uzorci za redom</span>
-                    <strong><span id="devSuspiciousCount">{{ suspicious_count|default(0) }}</span>&nbsp;/&nbsp;3</strong>
+                    <strong class="nowrap-value"><span id="devSuspiciousCount">{{ suspicious_count|default(0) }}</span>&nbsp;/&nbsp;3</strong>
                 </div>
                 {% if free_text_readiness %}
                     <div>
@@ -67,6 +67,67 @@
                     </div>
                 {% endif %}
             </div>
+
+            <section class="free-text-stats" id="freeTextStats" aria-label="Development statistika free-text modela">
+                <div class="free-text-stats-head">
+                    <div>
+                        <h3 id="freeTextStatsTitle">{{ free_text_profile.title if free_text_profile else 'Free-text statistika' }}</h3>
+                        <p class="muted" id="freeTextStatsDescription">{{ free_text_profile.description if free_text_profile else 'Statistika će se prikazati nakon prvog spremljenog duljeg uzorka.' }}</p>
+                    </div>
+                    <div class="free-text-score-grid" id="freeTextScoreGrid" {% if not free_text_profile or not free_text_profile.profile_ready or not free_text_profile.has_score %}hidden{% endif %}>
+                        <div>
+                            <span>Score modela</span>
+                            <strong id="freeTextScore">{{ free_text_profile.score if free_text_profile else '—' }}</strong>
+                        </div>
+                        <div>
+                            <span>Granica</span>
+                            <strong id="freeTextMargin">{{ free_text_profile.acceptance_margin if free_text_profile else '—' }}</strong>
+                        </div>
+                        <div>
+                            <span>Razlika od granice</span>
+                            <strong id="freeTextDelta" class="{{ free_text_profile.score_delta_level if free_text_profile and free_text_profile.profile_ready else '' }}" title="score - granica; pozitivno znači prolaz">{{ free_text_profile.score_delta_to_margin if free_text_profile else '—' }}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="free-text-stat-list" id="freeTextStatList">
+                    {% if free_text_profile %}
+                        {% for row in free_text_profile.rows %}
+                            <div class="free-text-stat-row {{ row.level }}">
+                                <div class="stat-feature">
+                                    <span>Značajka</span>
+                                    <strong>{{ row.label }}</strong>
+                                </div>
+                                <div>
+                                    <span>Zadnji uzorak</span>
+                                    <strong>{{ row.current }}</strong>
+                                </div>
+                                {% if free_text_profile.profile_ready %}
+                                    <div>
+                                        <span>Profil</span>
+                                        <strong>{{ row.profile }}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Std profila</span>
+                                        <strong>{{ row.profile_std }}</strong>
+                                    </div>
+                                    <div class="stat-assessment">
+                                        <span>Procjena</span>
+                                        <strong>{{ row.assessment }}</strong>
+                                    </div>
+                                {% else %}
+                                    <div class="stat-assessment">
+                                        <span>Faza</span>
+                                        <strong>{{ row.assessment }}</strong>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="muted">Još nema spremljenih free-text uzoraka.</p>
+                    {% endif %}
+                </div>
+            </section>
         </aside>
     </div>
 </section>
@@ -82,6 +143,13 @@
     const devRequiredTraining = document.getElementById("devRequiredTraining");
     const devPhaseLabel = document.getElementById("devPhaseLabel");
     const devPhaseHelp = document.getElementById("devPhaseHelp");
+    const freeTextStatsTitle = document.getElementById("freeTextStatsTitle");
+    const freeTextStatsDescription = document.getElementById("freeTextStatsDescription");
+    const freeTextStatList = document.getElementById("freeTextStatList");
+    const freeTextScoreGrid = document.getElementById("freeTextScoreGrid");
+    const freeTextScore = document.getElementById("freeTextScore");
+    const freeTextMargin = document.getElementById("freeTextMargin");
+    const freeTextDelta = document.getElementById("freeTextDelta");
     let events = [];
     let windowTextStart = bodyBox.value.length;
     let startedAt = null;
@@ -99,6 +167,50 @@
             devTypingStatus.textContent = message;
             devTypingStatus.className = type;
         }
+    }
+
+    function renderFreeTextStats(profile) {
+        if (!profile || !freeTextStatList) return;
+        if (freeTextStatsTitle) freeTextStatsTitle.textContent = profile.title || "Free-text statistika";
+        if (freeTextStatsDescription) freeTextStatsDescription.textContent = profile.description || "";
+
+        if (freeTextScoreGrid) {
+            freeTextScoreGrid.hidden = !profile.profile_ready || !profile.has_score;
+        }
+        if (freeTextScore) freeTextScore.textContent = profile.score || "—";
+        if (freeTextMargin) freeTextMargin.textContent = profile.acceptance_margin || "—";
+        if (freeTextDelta) {
+            freeTextDelta.textContent = profile.score_delta_to_margin || "—";
+            freeTextDelta.className = profile.profile_ready ? (profile.score_delta_level || "neutral") : "";
+        }
+
+        const rows = Array.isArray(profile.rows) ? profile.rows : [];
+        if (!rows.length) {
+            freeTextStatList.innerHTML = '<p class="muted">Još nema spremljenih free-text uzoraka.</p>';
+            return;
+        }
+
+        freeTextStatList.innerHTML = rows.map((row) => {
+            const level = row.level || "neutral";
+            if (profile.profile_ready) {
+                return `
+                    <div class="free-text-stat-row ${level}">
+                        <div class="stat-feature"><span>Značajka</span><strong>${row.label}</strong></div>
+                        <div><span>Zadnji uzorak</span><strong>${row.current}</strong></div>
+                        <div><span>Profil</span><strong>${row.profile}</strong></div>
+                        <div><span>Std profila</span><strong>${row.profile_std}</strong></div>
+                        <div class="stat-assessment"><span>Procjena</span><strong>${row.assessment}</strong></div>
+                    </div>
+                `;
+            }
+            return `
+                <div class="free-text-stat-row ${level}">
+                    <div class="stat-feature"><span>Značajka</span><strong>${row.label}</strong></div>
+                    <div><span>Zadnji uzorak</span><strong>${row.current}</strong></div>
+                    <div class="stat-assessment"><span>Faza</span><strong>${row.assessment}</strong></div>
+                </div>
+            `;
+        }).join("");
     }
 
     function updateDevPanel(data) {
@@ -120,11 +232,14 @@
         }
         if (devPhaseHelp && data.free_text_readiness) {
             if (data.free_text_readiness.model_ready) {
-                devPhaseHelp.textContent = "Novi dulji odlomci koriste se za provjeru ritma tipkanja.";
+                devPhaseHelp.textContent = "Novi dulji odlomci koriste se za provjeru ritma tipkanja. Prihvaćeni uzorci se dodaju u profil, a sumnjivi se ne koriste za treniranje.";
             } else {
                 const remaining = data.free_text_readiness.remaining_training_samples || 0;
                 devPhaseHelp.textContent = `Potrebno je još ${remaining} početnih uzoraka prije uključivanja provjere.`;
             }
+        }
+        if (data.free_text_profile) {
+            renderFreeTextStats(data.free_text_profile);
         }
     }
 
