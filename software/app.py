@@ -1065,7 +1065,7 @@ def create_app():
                 "suspicious_count": 0,
                 "logout_required": False,
                 "free_text_readiness": summarize_free_text_readiness(user.id),
-                "message": "Spremljen je početni free-text uzorak za treniranje modela."
+                "message": "Spremljen je početni free-text uzorak."
             })
 
         # 2) AKO MODEL JOŠ NIJE NASTAO, pokušaj ga istrenirati

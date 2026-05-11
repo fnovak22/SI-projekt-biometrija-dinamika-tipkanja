@@ -1109,3 +1109,9 @@ code {
     font: inherit;
     line-height: inherit;
 }
+
+#devTypingStatus{
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
