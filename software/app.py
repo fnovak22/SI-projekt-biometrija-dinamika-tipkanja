@@ -381,19 +381,32 @@ def explain_fixed_attempt(features, model_result, profile_summary):
     failed = [row for row in sorted_rows if row["status"] == "bad"]
     warnings = [row for row in sorted_rows if row["status"] == "warn"]
 
+    score = model_result.get("score")
+    margin = FIXED_TEXT_ACCEPTANCE_MARGIN
+    score_delta = None
+    if isinstance(score, (int, float)):
+        score_delta = round(float(score) - float(margin), 4)
+
+    near_margin = score_delta is not None and -0.02 <= score_delta < 0
+
     if model_result.get("accepted"):
-        summary = "Model je prihvatio pokušaj. Većina mjera ritma dovoljno odgovara profilu."
+        summary = "Model je prihvatio pokušaj. Score je iznad granice prihvaćanja ili ga je model izravno označio kao prihvatljiv."
+    elif near_margin:
+        summary = "Pokušaj je vrlo blizu granice prihvaćanja, ali score je još malo ispod margine. Pokušaj ponovno normalnim tempom."
     elif failed:
         summary = "Model nije prihvatio pokušaj. Najviše odskaču: " + ", ".join(row["label"] for row in failed[:3]) + "."
     elif warnings:
         summary = "Model nije prihvatio pokušaj, ali odstupanja su uglavnom rubna. Pokušaj prepisati frazu normalnim tempom."
     else:
-        summary = "Model nije prihvatio pokušaj. Provjeri score i broj trening uzoraka."
+        summary = "Model nije prihvatio pokušaj. Provjeri score, granicu prihvaćanja i broj trening uzoraka."
 
     return {
         "summary": summary,
-        "score": model_result.get("score"),
+        "score": score,
+        "prediction": model_result.get("prediction"),
         "accepted": bool(model_result.get("accepted")),
+        "near_margin": near_margin,
+        "score_delta_to_margin": score_delta,
         "training_sample_count": profile_summary.get("training_sample_count", 0),
         "enrollment_sample_count": profile_summary.get("enrollment_sample_count", 0),
         "successful_verify_sample_count": profile_summary.get("successful_verify_sample_count", 0),
@@ -450,9 +463,27 @@ def summarize_free_text_readiness(user_id):
         TypingSample.user_id == user_id,
         TypingSample.sample_type.like("free_text%")
     ).order_by(TypingSample.created_at.desc()).limit(20).all()
+    training_count = TypingSample.query.filter_by(
+        user_id=user_id,
+        sample_type="free_text_enroll"
+    ).count()
+    model_ready = free_text_model_exists(user_id)
+    remaining_training = max(REQUIRED_FREE_TEXT_ENROLL_SAMPLES - training_count, 0)
+    if model_ready:
+        phase = "verification"
+        phase_label = "Model je spreman za provjeru"
+    else:
+        phase = "training"
+        phase_label = f"Prikupljanje početnih uzoraka ({training_count}/{REQUIRED_FREE_TEXT_ENROLL_SAMPLES})"
     return {
         "sample_type": "free_text",
         "sample_count": free_text_sample_count_for_user(user_id),
+        "training_count": training_count,
+        "required_training_samples": REQUIRED_FREE_TEXT_ENROLL_SAMPLES,
+        "remaining_training_samples": remaining_training,
+        "model_ready": model_ready,
+        "phase": phase,
+        "phase_label": phase_label,
         "stored_fields": ["typed_text", "events_json", "features_json", "created_at", "user_id"],
         "features_include": [
             "duration_ms", "keydown_count", "keyup_count", "char_count", "backspace_count",
@@ -1034,7 +1065,7 @@ def create_app():
                 "suspicious_count": 0,
                 "logout_required": False,
                 "free_text_readiness": summarize_free_text_readiness(user.id),
-                "message": "Spremljen je uzorak pisanja bilješke."
+                "message": "Spremljen je početni free-text uzorak za treniranje modela."
             })
 
         # 2) AKO MODEL JOŠ NIJE NASTAO, pokušaj ga istrenirati
@@ -1062,7 +1093,7 @@ def create_app():
                     "suspicious_count": 0,
                     "logout_required": False,
                     "free_text_readiness": summarize_free_text_readiness(user.id),
-                    "message": "Model još nije spreman za provjeru."
+                    "message": "Model još nije spreman za provjeru. Prikupljaju se početni uzorci."
                 })
 
         # 3) SVAKI SLJEDEĆI FREE-TEXT UNOS: provjera

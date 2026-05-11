@@ -8,7 +8,7 @@ from sklearn.svm import OneClassSVM
 
 from ml.feature_extractor import features_to_vector_fixed
 
-FIXED_TEXT_ACCEPTANCE_MARGIN = -0.05
+FIXED_TEXT_ACCEPTANCE_MARGIN = -0.08
 
 def get_models_dir():
     base_dir = os.path.abspath(
@@ -91,7 +91,10 @@ def verify_fixed_typing(user_id, features):
 
     return {
         "accepted": accepted,
+        "prediction": int(prediction),
         "score": float(score),
+        "acceptance_margin": FIXED_TEXT_ACCEPTANCE_MARGIN,
+        "score_delta_to_margin": float(score - FIXED_TEXT_ACCEPTANCE_MARGIN),
         "message": (
             "Autentifikacija uspješna."
             if accepted

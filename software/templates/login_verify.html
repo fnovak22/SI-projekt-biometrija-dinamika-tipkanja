@@ -39,6 +39,14 @@
                     <strong id="devModelScore">Čeka pokušaj</strong>
                 </div>
                 <div>
+                    <span>Granica prihvaćanja</span>
+                    <strong id="devAcceptanceMargin">-0.060</strong>
+                </div>
+                <div>
+                    <span>Razlika od granice</span>
+                    <strong id="devScoreDelta" class="info">Čeka pokušaj</strong>
+                </div>
+                <div>
                     <span>Rezultat</span>
                     <strong id="devModelResult" class="info">Čeka pokušaj</strong>
                 </div>
@@ -84,6 +92,8 @@
     const promptIdText = document.getElementById("promptIdText");
     const devTrainingCount = document.getElementById("devTrainingCount");
     const devModelScore = document.getElementById("devModelScore");
+    const devAcceptanceMargin = document.getElementById("devAcceptanceMargin");
+    const devScoreDelta = document.getElementById("devScoreDelta");
     const devModelResult = document.getElementById("devModelResult");
     const devExplanation = document.getElementById("devExplanation");
     const devCompareBody = document.getElementById("devCompareBody");
@@ -162,6 +172,8 @@
     function renderInitialDebugPanel() {
         if (!initialDebugStats) return;
         devTrainingCount.textContent = `${initialDebugStats.training_sample_count || 0} ukupno`;
+        const margin = initialDebugStats.acceptance_margin ?? (initialDebugStats.model && initialDebugStats.model.acceptance_margin);
+        if (margin !== undefined && margin !== null) devAcceptanceMargin.textContent = formatNumber(margin);
         const summary = initialDebugStats.overall_summary || {};
         const labels = {
             avg_dwell_ms: "Vrijeme držanja tipke",
@@ -189,8 +201,14 @@
 
         devTrainingCount.textContent = `${explanation.training_sample_count || 0} ukupno`;
         devModelScore.textContent = formatNumber(explanation.score);
-        devModelResult.textContent = explanation.accepted ? "Prihvaćeno" : "Odbijeno";
-        devModelResult.className = explanation.accepted ? "good" : "bad";
+        devAcceptanceMargin.textContent = formatNumber(explanation.acceptance_margin);
+
+        const delta = explanation.score_delta_to_margin;
+        devScoreDelta.textContent = delta === null || delta === undefined ? "—" : `${delta >= 0 ? "+" : ""}${formatNumber(delta)}`;
+        devScoreDelta.className = explanation.accepted ? "good" : (explanation.near_margin ? "warn" : "bad");
+
+        devModelResult.textContent = explanation.accepted ? "Prihvaćeno" : (explanation.near_margin ? "Skoro prihvaćeno" : "Odbijeno");
+        devModelResult.className = explanation.accepted ? "good" : (explanation.near_margin ? "warn" : "bad");
         devExplanation.textContent = explanation.summary || "Nema dodatnog objašnjenja.";
 
         devCompareBody.innerHTML = (explanation.rows || []).map(row => {

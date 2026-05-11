@@ -913,7 +913,7 @@ code {
 }
 
 .fixed-dev-summary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .dev-explanation {
@@ -1013,4 +1013,99 @@ code {
     .dev-pill {
         white-space: nowrap;
     }
+}
+
+
+/* --- Fixed-text margin clarity --- */
+.fixed-dev-summary {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+    .fixed-dev-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .fixed-dev-summary {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* --- Free-text development training phase --- */
+.dev-training-callout {
+    display: grid;
+    gap: 6px;
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 1px solid #dbeafe;
+    background: linear-gradient(135deg, #eff6ff, #f8fafc);
+}
+
+.dev-training-callout strong {
+    color: #1d4ed8;
+    font-size: 15px;
+}
+
+.dev-training-callout span {
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+.free-text-dev-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1050px) {
+    .free-text-dev-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 650px) {
+    .free-text-dev-metrics {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+/* --- Free-text development panel cleanup --- */
+.free-text-dev-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.free-text-dev-metrics strong,
+.dev-metrics strong {
+    white-space: nowrap;
+}
+
+.free-text-dev-metrics div {
+    min-width: 0;
+}
+
+@media (max-width: 1050px) {
+    .free-text-dev-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 820px) {
+    .free-text-dev-metrics {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* --- Keep inline values inside development metric cards on one line --- */
+.dev-metrics strong {
+    white-space: nowrap;
+}
+
+.dev-metrics strong span {
+    display: inline;
+    margin: 0;
+    color: inherit;
+    font: inherit;
+    line-height: inherit;
 }
