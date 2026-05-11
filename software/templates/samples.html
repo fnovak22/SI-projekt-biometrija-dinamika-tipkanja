@@ -1,64 +1,45 @@
 {% extends "base.html" %}
-{% block title %}Moji uzorci | {{ app_name }}{% endblock %}
+{% block title %}Aktivnosti tipkanja | {{ app_name }}{% endblock %}
 {% block content %}
-<section class="card">
-    <div class="section-head">
+<section class="card samples-page">
+    <div class="section-head section-head-tight">
         <div>
-            <p class="eyebrow">Provjera podataka</p>
-            <h1>Spremljeni uzorci</h1>
-            <p class="muted">Ovdje vidiš zadnjih 50 svojih uzoraka. Administratorski račun može izvesti CSV svih korisnika.</p>
+            <p class="eyebrow">Pregled aktivnosti</p>
+            <h1>Aktivnosti tipkanja</h1>
+            <p class="muted">Pregled nedavno spremljenih aktivnosti povezanih s prijavom i korištenjem aplikacije.</p>
         </div>
-        <a class="button" href="{{ url_for('export_typing_samples_csv') }}">Preuzmi CSV</a>
     </div>
 
     {% if rows %}
-        <div class="table-wrap">
-            <table>
+        <div class="table-wrap desktop-table-wrap">
+            <table class="activity-table">
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>Tip</th>
-                        <th>Prompt</th>
-                        <th>Korisnik</th>
                         <th>Vrijeme</th>
+                        <th>Aktivnost</th>
+                        <th>Rezultat</th>
                         <th>Trajanje</th>
-                        <th>Tipke</th>
-                        <th>Backspace</th>
-                        <th>Avg dwell</th>
-                        <th>Avg DD</th>
-                        <th>Std dwell</th>
-                        <th>Std DD</th>
-                        <th>Brzina</th>
-                        <th>Pauze</th>
+                        <th>Brzina tipkanja</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in rows %}
                         <tr>
-                            <td>#{{ row.sample.id }}</td>
-                            <td><span class="sample-chip">{{ row.sample.sample_type }}</span></td>
-                            <td>{{ row.sample.prompt_id or '-' }}</td>
-                            <td>{{ row.sample.username }}</td>
-                            <td>{{ row.sample.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                            <td>{{ row.features.duration_ms }} ms</td>
-                            <td>{{ row.features.keydown_count }}</td>
-                            <td>{{ row.features.backspace_count }}</td>
-                            <td>{{ row.features.avg_dwell_ms }} ms</td>
-                            <td>{{ row.features.avg_dd_interval_ms }} ms</td>
-                            <td>{{ row.features.std_dwell_ms|default('-') }} ms</td>
-                            <td>{{ row.features.std_dd_interval_ms|default('-') }} ms</td>
-                            <td>{{ row.features.typing_speed_chars_per_sec|default('-') }}</td>
-                            <td>{{ row.features.pause_ratio|default('-') }}</td>
+                            <td>{{ row.sample.created_at.strftime('%d.%m.%Y. %H:%M') }}</td>
+                            <td>{{ row.label }}</td>
+                            <td>{{ row.result }}</td>
+                            <td>{{ row.duration }}</td>
+                            <td>{{ row.speed }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     {% else %}
-        <div class="empty-state">
-            <h2>Još nema uzoraka</h2>
-            <p class="muted">Ako si upravo napravio račun, obavezni enrollment uzorci će se vidjeti nakon prve uspješne prijave.</p>
-            <a class="button" href="{{ url_for('collect') }}">Prikupi fixed-text uzorak</a>
+        <div class="empty-state clean-empty-state">
+            <h2>Još nema aktivnosti</h2>
+            <p class="muted">Aktivnosti će se pojaviti nakon registracije, prijave ili duljeg pisanja bilješki.</p>
+            <a class="button" href="{{ url_for('index') }}">Natrag na bilješke</a>
         </div>
     {% endif %}
 </section>

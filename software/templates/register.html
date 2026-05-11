@@ -1,21 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Registracija | {{ app_name }}{% endblock %}
 {% block content %}
-<section class="auth-layout narrow">
+<section class="auth-layout narrow desktop-auth-layout">
     <div class="hero-card">
-        <p class="eyebrow">Registracija + enrollment</p>
+        <p class="eyebrow">Otvaranje računa</p>
         <h1>Račun se aktivira nakon {{ required_samples }} uzoraka tipkanja</h1>
-        <p class="lead">Nakon korisničkog imena i lozinke prepisuješ 5 fiksnih fraza po 4 puta. Ti uzorci služe za drugi korak prijave i ML istraživanje.</p>
+        <p class="lead">Nakon unosa podataka računa slijedi kratko prikupljanje uzoraka tipkanja. Ti uzorci služe za dodatnu provjeru identiteta pri prijavi.</p>
         <div class="info-grid two">
-            <div><strong>5 fraza</strong><span>usporedivi promptovi</span></div>
-            <div><strong>20 uzoraka</strong><span>obavezno za registraciju</span></div>
+            <div><strong>5 fraza</strong><span>kratke i jasno prikazane</span></div>
+            <div><strong>20 uzoraka</strong><span>potrebno za dovršetak registracije</span></div>
         </div>
-        <p class="lead small-lead">Za research admin račun registrirajte korisničko ime <strong>admin</strong>.</p>
     </div>
 
     <form class="card auth-card" method="POST" action="{{ url_for('register') }}">
-        <h2>1. Podaci računa</h2>
-        <p class="muted">Nakon ovog koraka odmah ide obavezno prikupljanje dinamike tipkanja.</p>
+        <h2>Podaci računa</h2>
+        <p class="muted">Nakon ovog koraka odmah prelaziš na dovršetak registracije.</p>
+
 
         <label for="username">Korisničko ime</label>
         <input id="username" name="username" type="text" value="{{ username_value }}" autocomplete="username" minlength="3" required autofocus>
@@ -26,7 +26,15 @@
         <label for="confirm_password">Ponovi lozinku</label>
         <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
 
-        <button class="button full" type="submit">Nastavi na 20 uzoraka</button>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            <div class="inline-messages message-slot{% if not messages %} is-empty{% endif %}" aria-live="polite">
+                {% for category, msg in messages %}
+                    <div class="flash {{ category }}">{{ msg }}</div>
+                {% endfor %}
+            </div>
+        {% endwith %}
+
+        <button class="button full" type="submit">Nastavi</button>
         <p class="center muted">Već imaš račun? <a href="{{ url_for('login') }}">Prijavi se</a></p>
     </form>
 </section>

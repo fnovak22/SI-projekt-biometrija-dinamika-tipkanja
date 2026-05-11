@@ -1,21 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Prijava | {{ app_name }}{% endblock %}
 {% block content %}
-<section class="auth-layout">
+<section class="auth-layout desktop-auth-layout">
     <div class="hero-card">
         <p class="eyebrow">Privatni radni prostor</p>
-        <h1>Tvoje bilješke ostaju zaključane iza lozinke i dinamike tipkanja</h1>
-        <p class="lead">MyNotes izgleda kao obična aplikacija za privatne bilješke, ali nakon lozinke koristi dodatnu provjeru identiteta na temelju ritma tipkanja.</p>
+        <h1>Tvoje bilješke ostaju zaštićene lozinkom i provjerom tipkanja</h1>
+        <p class="lead">MyNotes je aplikacija za privatne bilješke koja nakon lozinke koristi i prepoznavanje ritma tipkanja kao dodatni sigurnosni korak.</p>
         <div class="info-grid">
-            <div><strong>1</strong><span>korisničko ime + lozinka</span></div>
-            <div><strong>2</strong><span>random fraza iz enrollmenta</span></div>
-            <div><strong>ML</strong><span>research dashboard za uzorke</span></div>
+            <div><strong>1</strong><span>prijava korisničkim imenom i lozinkom</span></div>
+            <div><strong>2</strong><span>prepisivanje kratke sigurnosne fraze</span></div>
+            <div><strong>3</strong><span>ulazak u tvoje bilješke</span></div>
         </div>
     </div>
 
     <form class="card auth-card" method="POST" action="{{ url_for('login') }}">
         <h2>Prijava</h2>
-        <p class="muted">Nakon točne lozinke slijedi kratka provjera dinamike tipkanja.</p>
+        <p class="muted">Nakon unosa lozinke slijedi kratka provjera tipkanja.</p>
+
 
         <label for="username">Korisničko ime</label>
         <input id="username" name="username" type="text" value="{{ username_value }}" autocomplete="username" required autofocus>
@@ -23,7 +24,15 @@
         <label for="password">Lozinka</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required>
 
-        <button class="button full" type="submit">Nastavi na provjeru tipkanja</button>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            <div class="inline-messages message-slot{% if not messages %} is-empty{% endif %}" aria-live="polite">
+                {% for category, msg in messages %}
+                    <div class="flash {{ category }}">{{ msg }}</div>
+                {% endfor %}
+            </div>
+        {% endwith %}
+
+        <button class="button full" type="submit">Nastavi</button>
         <p class="center muted">Nemaš račun? <a href="{{ url_for('register') }}">Registriraj se</a></p>
     </form>
 </section>

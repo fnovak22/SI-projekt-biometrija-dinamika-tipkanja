@@ -1,25 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Enrollment dovršen | {{ app_name }}{% endblock %}
+{% block title %}Registracija dovršena | {{ app_name }}{% endblock %}
 {% block content %}
 <section class="complete-layout">
     <div class="complete-hero hero-card">
         <p class="eyebrow">Registracija je dovršena</p>
         <h1>Tvoj MyNotes račun je spreman.</h1>
-        <p class="lead">Enrollment dinamike tipkanja je uspješno završen. MyNotes je naučio osnovni fixed-text profil tvog tipkanja i kod svake sljedeće prijave koristit će ga kao dodatni sigurnosni korak nakon lozinke.</p>
-        <div class="info-grid complete-kpis">
-            <div>
-                <strong>{{ stats.sample_count }}/{{ stats.required_samples }}</strong>
-                <span>spremljenih uzoraka</span>
-            </div>
-            <div>
-                <strong>5 × 4</strong>
-                <span>fraza i ponavljanja</span>
-            </div>
-            <div>
-                <strong>2FA</strong>
-                <span>lozinka + dinamika tipkanja</span>
-            </div>
-        </div>
+        <p class="lead">Registracija profila tipkanja je uspješno dovršena. MyNotes je spremio osnovni profil tvog tipkanja i pri svakoj sljedećoj prijavi koristit će ga kao dodatni sigurnosni korak nakon lozinke.</p>
     </div>
 
     <div class="card complete-card">
@@ -36,7 +22,7 @@
             </div>
             <div>
                 <span>2</span>
-                <p><strong>MyNotes prikaže jednu od enrollment fraza.</strong><br>Fraza se bira nasumično, pa ne mora uvijek biti ista.</p>
+                <p><strong>MyNotes prikaže jednu od registracijskih fraza.</strong><br>Fraza se bira nasumično, pa ne mora uvijek biti ista.</p>
             </div>
             <div>
                 <span>3</span>
@@ -53,8 +39,8 @@
         <div class="section-head">
             <div>
                 <p class="eyebrow">Tvoj profil tipkanja</p>
-                <h2>Sažetak enrollment statistike</h2>
-                <p class="muted">Ovo je statistika očišćenih fixed-text značajki koje se koriste za demonstracijski model. Raw podaci i dalje čuvaju sve tipke, ali Backspace i korekcije nisu dio fixed-text usporedbe.</p>
+                <h2>Sažetak statistike tipkanja</h2>
+                <p class="muted">Tablica prikazuje glavne mjere koje koristi model za fiksne fraze.</p>
             </div>
         </div>
         <div class="stats-table-wrap complete-table-wrap">
@@ -63,22 +49,46 @@
                     <tr>
                         <th>Značajka</th>
                         <th>Prosjek</th>
-                        <th>Std</th>
+                        <th>Standardna devijacija</th>
                         <th>Min</th>
                         <th>Max</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for name in stats.feature_names %}
-                        {% set row = stats.overall_summary.get(name, {}) %}
-                        <tr>
-                            <td><strong>{{ feature_labels.get(name, name) }}</strong><small>{{ name }}</small></td>
-                            <td>{{ "%.3f"|format(row.get("avg", 0)) }}</td>
-                            <td>{{ "%.3f"|format(row.get("std", 0)) }}</td>
-                            <td>{{ "%.3f"|format(row.get("min", 0)) }}</td>
-                            <td>{{ "%.3f"|format(row.get("max", 0)) }}</td>
-                        </tr>
-                    {% endfor %}
+                    {% set dwell_avg = stats.overall_summary.get('avg_dwell_ms', {}) %}
+                    {% set dwell_std = stats.overall_summary.get('std_dwell_ms', {}) %}
+                    {% set interval_avg = stats.overall_summary.get('avg_dd_interval_ms', {}) %}
+                    {% set interval_std = stats.overall_summary.get('std_dd_interval_ms', {}) %}
+                    {% set speed = stats.overall_summary.get('typing_speed_chars_per_sec', {}) %}
+                    {% set pauses = stats.overall_summary.get('pause_ratio', {}) %}
+                    <tr>
+                        <td><strong>Vrijeme držanja tipke (ms)</strong></td>
+                        <td>{{ "%.3f"|format(dwell_avg.get("avg", 0)) }}</td>
+                        <td>{{ "%.3f"|format(dwell_std.get("avg", 0)) }}</td>
+                        <td>{{ "%.3f"|format(dwell_avg.get("min", 0)) }}</td>
+                        <td>{{ "%.3f"|format(dwell_avg.get("max", 0)) }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Razmak između pritisaka (ms)</strong></td>
+                        <td>{{ "%.3f"|format(interval_avg.get("avg", 0)) }}</td>
+                        <td>{{ "%.3f"|format(interval_std.get("avg", 0)) }}</td>
+                        <td>{{ "%.3f"|format(interval_avg.get("min", 0)) }}</td>
+                        <td>{{ "%.3f"|format(interval_avg.get("max", 0)) }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Brzina tipkanja (znakova/s)</strong></td>
+                        <td>{{ "%.3f"|format(speed.get("avg", 0)) }}</td>
+                        <td>—</td>
+                        <td>{{ "%.3f"|format(speed.get("min", 0)) }}</td>
+                        <td>{{ "%.3f"|format(speed.get("max", 0)) }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Udio dužih pauza</strong></td>
+                        <td>{{ "%.3f"|format(pauses.get("avg", 0)) }}</td>
+                        <td>—</td>
+                        <td>{{ "%.3f"|format(pauses.get("min", 0)) }}</td>
+                        <td>{{ "%.3f"|format(pauses.get("max", 0)) }}</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -86,7 +96,7 @@
 
     <div class="card complete-card final-instruction">
         <h2>Važno</h2>
-        <p class="muted">Dinamika tipkanja nije zamjena za lozinku, nego dodatni sigurnosni signal. Zato se nakon lozinke radi još jedan kratki biometrijski korak. Piši normalno, bez copy/paste, jednako kao tijekom enrollmenta.</p>
+        <p class="muted">Dinamika tipkanja nije zamjena za lozinku, nego dodatni sigurnosni signal. Zato se nakon lozinke radi još jedan kratki korak provjere. Piši normalno, bez kopiranja teksta, jednako kao tijekom registracije.</p>
         <form method="post" action="{{ url_for('register_finish') }}">
             <button class="button" type="submit">OK, razumijem</button>
         </form>

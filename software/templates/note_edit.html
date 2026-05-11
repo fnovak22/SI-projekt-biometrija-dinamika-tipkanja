@@ -1,61 +1,71 @@
 {% extends "base.html" %}
 {% block title %}{% if note %}{{ note.title }}{% else %}Nova bilješka{% endif %} | {{ app_name }}{% endblock %}
 {% block content %}
-<section class="collect-layout">
-    <form class="card note-editor" id="noteForm" method="POST" action="{{ url_for('note_edit', note_id=note.id) if note else url_for('note_new') }}">
-        <p class="eyebrow">Privatna bilješka</p>
-        <h1>{% if note %}Uredi bilješku{% else %}Nova bilješka{% endif %}</h1>
-        <p class="muted">Zapiši što ti je na pameti. Svako malo spremit ćemo uzorak tvojeg tipkanja kao ML uzorak za demonstraciju kontinuirane autentifikacije nad free-text unosom.</p>
+<section class="editor-layout">
+    <div class="card note-editor editor-card">
+        <form id="noteForm" method="POST" action="{{ url_for('note_edit', note_id=note.id) if note else url_for('note_new') }}">
+            <div class="editor-header">
+                <div>
+                    <p class="eyebrow">Bilješka</p>
+                    <h1>{% if note %}Uredi bilješku{% else %}Nova bilješka{% endif %}</h1>
+                </div>
+                <div class="actions editor-actions">
+                    {% if note %}
+                        <button class="button danger" type="button" onclick="document.getElementById('deleteNoteForm').requestSubmit();">Obriši bilješku</button>
+                    {% endif %}
+                </div>
+            </div>
 
-        <label for="title">Naslov</label>
-        <input id="title" name="title" type="text" value="{{ note.title if note else '' }}" placeholder="Npr. Plan za projekt" autocomplete="off">
+            <label for="title">Naslov</label>
+            <input id="title" name="title" type="text" value="{{ note.title if note else '' }}" placeholder="Npr. Plan za projekt" autocomplete="off">
 
-        <div id="suspicious-counter" style="margin-top:10px; font-weight:bold;">
-            Sumnjivi uzorci zaredom: 0 / 3
-        </div>
+            <label for="body">Tekst bilješke</label>
+            <textarea id="body" name="body" class="note-body" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true" placeholder="Napiši svoju bilješku ovdje...">{{ note.body if note else '' }}</textarea>
 
-        <label for="body">Tekst bilješke</label>
-        <textarea id="body" name="body" class="note-body" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true" placeholder="Napiši svoju bilješku ovdje...">{{ note.body if note else '' }}</textarea>
+            <div class="actions editor-footer-actions">
+                <button class="button" type="submit">Spremi bilješku</button>
+                <a class="button secondary" href="{{ url_for('index') }}">Odustani</a>
+            </div>
+            <div id="typingStatus" class="sr-only" aria-live="polite"></div>
+        </form>
 
-        <div class="actions">
-            <button class="button" type="submit">Spremi bilješku</button>
-            <a class="button secondary" href="{{ url_for('index') }}">Natrag</a>
-        </div>
-        <div id="typingStatus" class="status info">Free-text praćenje je spremno. Uzorak se šalje tek kad ima dovoljno natipkanih znakova.</div>
-    </form>
-
-    <aside class="card side-card">
-        <h2>Tiha provjera identiteta</h2>
-        <p class="muted">Ovdje korisnik ne prepisuje zadanu frazu. Ovo je prirodan free-text scenarij: bilješka se koristi kao stvarni kontekst aplikacije, a dinamika tipkanja kao dodatni sigurnosni signal.</p>
-        <ul class="feature-list compact">
-            <li><strong>sample_type</strong><span>free_text_note</span></li>
-            <li><strong>prompt_id</strong><span>free_text</span></li>
-            <li><strong>sprema se</strong><span>typed_text, events_json, features_json</span></li>
-            <li><strong>backspace_count</strong><span>spremljen za free-text ML</span></li>
-            <li><strong>dosad spremljeno</strong><span id="freeTextCount">{{ free_text_readiness.sample_count if free_text_readiness else 0 }}</span></li>
-            <li><strong>export</strong><span>CSV za ML analizu</span></li>
-        </ul>
-        <div class="model-placeholder">
-            <strong>ML tim:</strong> free-text podaci se već spremaju kroz endpoint <code>/api/notes/typing-window</code>. Model još nije uključen u odluku o prijavi.
-        </div>
         {% if note %}
-            <form method="POST" action="{{ url_for('note_delete', note_id=note.id) }}" onsubmit="return confirm('Obrisati ovu bilješku?');">
-                <button class="button danger full" type="submit">Obriši bilješku</button>
-            </form>
+            <form id="deleteNoteForm" method="POST" action="{{ url_for('note_delete', note_id=note.id) }}" onsubmit="return confirm('Obrisati ovu bilješku?');"></form>
         {% endif %}
-    </aside>
+
+        <aside class="dev-panel" aria-label="Development status free-text provjere">
+            <div>
+                <p class="eyebrow">Development</p>
+                <h2>Free-text provjera tipkanja</h2>
+                <p class="muted">Privremeni prikaz za praćenje tihe provjere tijekom pisanja bilješki.</p>
+            </div>
+            <div class="dev-metrics">
+                <div>
+                    <span>Status</span>
+                    <strong id="devTypingStatus">Čeka dovoljno teksta za provjeru.</strong>
+                </div>
+                <div>
+                    <span>Sumnjivi uzorci za redom</span>
+                    <strong><span id="devSuspiciousCount">{{ suspicious_count|default(0) }}</span> / 3</strong>
+                </div>
+                {% if free_text_readiness %}
+                    <div>
+                        <span>Spremljeni free-text uzorci</span>
+                        <strong id="devFreeTextCount">{{ free_text_readiness.sample_count }}</strong>
+                    </div>
+                {% endif %}
+            </div>
+        </aside>
+    </div>
 </section>
 
 <script>
     const noteForm = document.getElementById("noteForm");
     const bodyBox = document.getElementById("body");
     const typingStatus = document.getElementById("typingStatus");
-    const freeTextCount = document.getElementById("freeTextCount");
-    const initialFreeTextReadiness = {{ free_text_readiness | tojson }};
-    console.group("[MyNotes free-text] Spremnost za ML tim");
-    console.log("Free-text readiness:", initialFreeTextReadiness);
-    console.log("Feature extraction uključuje backspace_count za free-text uzorke.");
-    console.groupEnd();
+    const devTypingStatus = document.getElementById("devTypingStatus");
+    const devSuspiciousCount = document.getElementById("devSuspiciousCount");
+    const devFreeTextCount = document.getElementById("devFreeTextCount");
     let events = [];
     let windowTextStart = bodyBox.value.length;
     let startedAt = null;
@@ -69,7 +79,20 @@
 
     function setTypingStatus(message, type = "info") {
         typingStatus.textContent = message;
-        typingStatus.className = "status " + type;
+        if (devTypingStatus) {
+            devTypingStatus.textContent = message;
+            devTypingStatus.className = type;
+        }
+    }
+
+    function updateDevPanel(data) {
+        if (!data) return;
+        if (devSuspiciousCount && typeof data.suspicious_count !== "undefined") {
+            devSuspiciousCount.textContent = data.suspicious_count;
+        }
+        if (devFreeTextCount && data.free_text_readiness && typeof data.free_text_readiness.sample_count !== "undefined") {
+            devFreeTextCount.textContent = data.free_text_readiness.sample_count;
+        }
     }
 
     function recordEvent(e) {
@@ -91,8 +114,8 @@
         if (segment.trim().length < 20 && force) {
             segment = bodyBox.value;
         }
-        const enoughText = segment.trim().length >= (force ? 180 : 180);
-        const enoughEvents = events.length >= (force ? 50 : 50);
+        const enoughText = segment.trim().length >= 180;
+        const enoughEvents = events.length >= 50;
         const cooldownPassed = performance.now() - lastSentAt > 4000;
         if (!enoughText || !enoughEvents || (!force && !cooldownPassed)) return false;
 
@@ -101,7 +124,7 @@
         windowTextStart = currentLength;
         startedAt = null;
         lastSentAt = performance.now();
-        setTypingStatus("Spremam free-text prozor tipkanja...", "info");
+        setTypingStatus("Provjeravam ritam tipkanja...", "info");
 
         try {
             const res = await fetch("{{ url_for('api_note_typing_window') }}", {
@@ -112,42 +135,30 @@
 
             const data = await res.json();
 
-            if (typeof data.suspicious_count !== "undefined") {
-                const el = document.getElementById("suspicious-counter");
-                if (el) {
-                    el.textContent = `Sumnjivi uzorci zaredom: ${data.suspicious_count} / 3`;
-                }
-            }
-
-            if (data.mode === "training") {
-                setTypingStatus(data.message || "Free-text enrollment uzorak spremljen.", "info");
-            }
-
-            if (data.sample_type === "free_text_suspicious") {
-                alert("Detektirana promjena u načinu tipkanja. Sumnjivi uzorci zaredom: " + data.suspicious_count);
-            }
-
             if (data.logout_required) {
                 alert(data.message || "Zbog sumnjive dinamike tipkanja bit ćete odjavljeni.");
                 window.location.href = data.redirect_url || "{{ url_for('login') }}";
                 return false;
             }
-           
+
             if (!res.ok || !data.ok) {
-                setTypingStatus("Free-text prozor nije spremljen: " + (data.error || "nepoznata greška"), "bad");
+                setTypingStatus("Provjera tipkanja nije spremljena.", "bad");
                 return false;
             }
 
-            console.group(`[MyNotes free-text] Spremljen uzorak #${data.sample_id}`);
-            console.log("Featurei free-text uzorka:", data.features);
-            console.log("Free-text readiness:", data.free_text_readiness);
-            console.groupEnd();
-            if (freeTextCount && data.free_text_readiness) freeTextCount.textContent = data.free_text_readiness.sample_count;
-            setTypingStatus(`Free-text uzorak #${data.sample_id} spremljen.`, "good");
+            updateDevPanel(data);
+            if (data.mode === "training") {
+                setTypingStatus(data.message || "Uzorak je spremljen za treniranje free-text modela.", "good");
+            } else if (data.logout_required) {
+                setTypingStatus(data.message || "Provjera je zatražila ponovnu prijavu.", "bad");
+            } else if (data.sample_type === "free_text_suspicious") {
+                setTypingStatus(data.message || "Uzorak je označen kao sumnjiv.", "bad");
+            } else {
+                setTypingStatus(data.message || "Provjera tipkanja je spremljena.", "good");
+            }
             return true;
         } catch (err) {
-            console.error("[MyNotes free-text] Greška kod spremanja:", err);
-            setTypingStatus("Server nije odgovorio za free-text uzorak.", "bad");
+            setTypingStatus("Server nije odgovorio za provjeru tipkanja.", "bad");
             return false;
         }
     }

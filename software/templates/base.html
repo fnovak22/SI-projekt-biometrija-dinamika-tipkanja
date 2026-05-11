@@ -9,7 +9,17 @@
 <body>
     <div class="page-shell">
         <header class="topbar">
-            <a class="brand" href="{{ url_for('index') if logged_in_username else url_for('login') }}">
+            {% if logged_in_username %}
+                {% set brand_href = url_for('index') %}
+            {% elif pending_registration %}
+                {% set brand_href = url_for('register_enroll') %}
+            {% elif pending_login %}
+                {% set brand_href = url_for('login_verify') %}
+            {% else %}
+                {% set brand_href = url_for('login') %}
+            {% endif %}
+
+            <a class="brand" href="{{ brand_href }}">
                 <span class="brand-icon">📝</span>
                 <span>
                     <strong>{{ app_name }}</strong>
@@ -19,28 +29,21 @@
             <nav class="nav">
                 {% if logged_in_username %}
                     <a href="{{ url_for('index') }}">Bilješke</a>
-                    <a href="{{ url_for('note_new') }}">Nova bilješka</a>
-                    <a href="{{ url_for('samples') }}">Moji uzorci <span class="pill">{{ nav_sample_count }}</span></a>
+                    <a href="{{ url_for('samples') }}">Aktivnosti tipkanja</a>
                     {% if logged_in_role == 'admin' %}
-                        <a href="{{ url_for('admin_dashboard') }}">Research admin</a>
+                        <a href="{{ url_for('admin_dashboard') }}">Administracija</a>
                     {% endif %}
                     <a class="nav-muted" href="{{ url_for('logout') }}">Odjava</a>
+                {% elif pending_registration %}
+                    <a class="nav-muted" href="{{ url_for('logout') }}">Prekini</a>
+                {% elif pending_login %}
+                    <a class="nav-muted" href="{{ url_for('logout') }}">Prekini prijavu</a>
                 {% else %}
                     <a href="{{ url_for('login') }}">Prijava</a>
                     <a class="button small" href="{{ url_for('register') }}">Registracija</a>
                 {% endif %}
             </nav>
         </header>
-
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <section class="flash-wrap">
-                    {% for category, msg in messages %}
-                        <div class="flash {{ category }}">{{ msg }}</div>
-                    {% endfor %}
-                </section>
-            {% endif %}
-        {% endwith %}
 
         <main>
             {% block content %}{% endblock %}

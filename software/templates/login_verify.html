@@ -1,39 +1,71 @@
 {% extends "base.html" %}
 {% block title %}Provjera tipkanja | {{ app_name }}{% endblock %}
 {% block content %}
-<section class="collect-layout">
+<section class="verify-layout">
     <div class="card collect-card">
         <p class="eyebrow">2. korak prijave za {{ username }}</p>
-        <h1>Prepiši random frazu za provjeru identiteta</h1>
-        <p class="muted">Aplikacija bira jednu od 5 enrollment fraza. Ako provjera ne prođe, dobit ćeš drugu frazu. Enter pokreće provjeru kada je tekst točan.</p>
-
-        <div class="model-placeholder">
-            <strong>Model status:</strong>
-            <span>fixed-text One-Class SVM, tolerancija <code>nu = 0.15</code>, model koristi očišćene znakove završne fraze bez Backspace/Delete/navigation tipki</span>
-        </div>
+        <h1>Prepiši sigurnosnu frazu za provjeru identiteta</h1>
+        <p class="muted">Prepiši prikazanu frazu normalnim tempom. Ako provjera ne prođe, dobit ćeš novu frazu za pokušaj. Enter pokreće provjeru kada je tekst točan.</p>
 
         <div class="prompt-box prompt-compare" id="promptText"></div>
         <div class="typing-meta">
-            <span>Prompt: <strong id="promptIdText">{{ prompt.id }}</strong></span>
-            <span>Status: <strong id="matchText">čeka unos</strong></span>
+            <span>Fraza: <strong id="promptIdText">spremna</strong></span>
+            <span>Podudaranje: <strong id="matchText">čeka unos</strong></span>
         </div>
 
         <label for="typingBox">Prepiši ovdje</label>
         <textarea id="typingBox" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Klikni ovdje i prepiši frazu..."></textarea>
+        <div id="status" class="status typing-status"></div>
 
         <div class="actions">
             <button class="button" id="verifyBtn" type="button">Provjeri i prijavi me</button>
             <button class="button secondary" id="resetBtn" type="button">Ponovi</button>
         </div>
 
-        <div id="status" class="status"></div>
+        <aside class="dev-panel fixed-dev-panel" aria-label="Development status fixed-text provjere">
+            <div>
+                <p class="eyebrow">Development</p>
+                <h2>Fixed-text provjera tipkanja</h2>
+                <p class="muted">Privremeni prikaz za lakše testiranje prijave. Uspoređuje trenutni pokušaj s profilom korisnika. Stupac “Std profila” označava standardnu devijaciju spremljenog profila.</p>
+            </div>
+
+            <div class="dev-metrics fixed-dev-summary">
+                <div>
+                    <span>Trening uzorci</span>
+                    <strong id="devTrainingCount">-</strong>
+                </div>
+                <div>
+                    <span>Score modela</span>
+                    <strong id="devModelScore">Čeka pokušaj</strong>
+                </div>
+                <div>
+                    <span>Rezultat</span>
+                    <strong id="devModelResult" class="info">Čeka pokušaj</strong>
+                </div>
+            </div>
+
+            <div class="dev-explanation" id="devExplanation">
+                Prepiši frazu i pokreni provjeru. Nakon pokušaja ovdje će se prikazati koje mjere ritma tipkanja najviše odstupaju od profila.
+            </div>
+
+            <div class="dev-table-wrap">
+                <table class="dev-table">
+                    <thead>
+                        <tr>
+                            <th>Značajka</th>
+                            <th>Pokušaj</th>
+                            <th>Profil</th>
+                            <th title="Standardna devijacija profila korisnika">Std profila</th>
+                            <th>Procjena</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devCompareBody"></tbody>
+                </table>
+            </div>
+        </aside>
+
     </div>
 
-    <aside class="card side-card">
-        <h2>Debug u browser konzoli</h2>
-        <p class="muted">Na otvaranju stranice ispisuje se profil korisnika. Nakon svakog pokušaja ispisuju se featurei, fixed-vector, score i rezultat usporedbe.</p>
-        <p class="muted">Uspješni pokušaji ulaze u buduće treniranje modela. Neuspješni pokušaji se spremaju samo za analizu i ne koriste se za treniranje.</p>
-    </aside>
 </section>
 
 <script>
@@ -50,17 +82,12 @@
     const resetBtn = document.getElementById("resetBtn");
     const matchText = document.getElementById("matchText");
     const promptIdText = document.getElementById("promptIdText");
+    const devTrainingCount = document.getElementById("devTrainingCount");
+    const devModelScore = document.getElementById("devModelScore");
+    const devModelResult = document.getElementById("devModelResult");
+    const devExplanation = document.getElementById("devExplanation");
+    const devCompareBody = document.getElementById("devCompareBody");
 
-    console.group("[MyNotes biometrika] Profil korisnika na otvaranju stranice");
-    console.log("Korisnik:", {{ username|tojson }});
-    console.log("Model:", initialDebugStats.model);
-    console.log("Feature redoslijed fixed vektora:", initialDebugStats.feature_names);
-    console.log("Sažetak trening profila:", initialDebugStats.overall_summary);
-    console.log("Sažetak po promptu:", initialDebugStats.per_prompt_summary);
-    console.log("Broj enrollment uzoraka:", initialDebugStats.enrollment_sample_count);
-    console.log("Broj uspješnih verify uzoraka u treningu:", initialDebugStats.successful_verify_sample_count);
-    console.log("Broj neuspješnih verify uzoraka izvan treninga:", initialDebugStats.failed_verify_sample_count);
-    console.groupEnd();
 
     function nowRelative() {
         const n = performance.now();
@@ -89,12 +116,21 @@
 
     function setStatus(message, type = "") {
         statusBox.textContent = message;
-        statusBox.className = "status " + type;
+        statusBox.className = "status typing-status " + type;
+    }
+
+    function blockPaste(e) {
+        e.preventDefault();
+        setStatus("Lijepljenje teksta nije dopušteno. Frazu prepiši ručno.", "bad");
+    }
+
+    function isPasteShortcut(e) {
+        return (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v";
     }
 
     function updateProgress() {
         const typed = typingBox.value;
-        promptIdText.textContent = promptItem.id;
+        promptIdText.textContent = "spremna";
         renderComparedPrompt(promptItem.text, typed);
         if (!typed.length) {
             matchText.textContent = "čeka unos";
@@ -109,6 +145,65 @@
             matchText.textContent = firstWrong >= 0 ? `greška na znaku ${firstWrong + 1}` : "greška u tekstu";
             matchText.className = "bad";
         }
+    }
+
+    function formatNumber(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+        return Number(value).toFixed(3).replace(/\.?0+$/, "");
+    }
+
+    function statusClass(status) {
+        if (status === "good") return "good";
+        if (status === "bad") return "bad";
+        if (status === "warn") return "warn";
+        return "info";
+    }
+
+    function renderInitialDebugPanel() {
+        if (!initialDebugStats) return;
+        devTrainingCount.textContent = `${initialDebugStats.training_sample_count || 0} ukupno`;
+        const summary = initialDebugStats.overall_summary || {};
+        const labels = {
+            avg_dwell_ms: "Vrijeme držanja tipke",
+            avg_dd_interval_ms: "Razmak između pritisaka",
+            std_dwell_ms: "Std držanja tipke",
+            std_dd_interval_ms: "Std razmaka",
+            typing_speed_chars_per_sec: "Brzina tipkanja",
+            pause_ratio: "Udio dužih pauza"
+        };
+        devCompareBody.innerHTML = Object.keys(labels).map(name => {
+            const item = summary[name] || {};
+            return `<tr>
+                <td>${labels[name]}</td>
+                <td>—</td>
+                <td>${formatNumber(item.avg)}</td>
+                <td>${formatNumber(item.std)}</td>
+                <td><span class="dev-pill info">profil</span></td>
+            </tr>`;
+        }).join("");
+    }
+
+    function renderAttemptDebug(data) {
+        const explanation = data && data.debug_explanation;
+        if (!explanation) return;
+
+        devTrainingCount.textContent = `${explanation.training_sample_count || 0} ukupno`;
+        devModelScore.textContent = formatNumber(explanation.score);
+        devModelResult.textContent = explanation.accepted ? "Prihvaćeno" : "Odbijeno";
+        devModelResult.className = explanation.accepted ? "good" : "bad";
+        devExplanation.textContent = explanation.summary || "Nema dodatnog objašnjenja.";
+
+        devCompareBody.innerHTML = (explanation.rows || []).map(row => {
+            const cls = statusClass(row.status);
+            const z = row.z_score === null || row.z_score === undefined ? "" : ` · z=${formatNumber(row.z_score)}`;
+            return `<tr class="${cls}">
+                <td>${row.label}</td>
+                <td>${formatNumber(row.attempt_value)}</td>
+                <td>${formatNumber(row.profile_avg)}</td>
+                <td>${formatNumber(row.profile_std)}</td>
+                <td><span class="dev-pill ${cls}">${row.verdict}${z}</span></td>
+            </tr>`;
+        }).join("");
     }
 
     function resetTyping(message) {
@@ -136,18 +231,10 @@
 
     function logAttemptResult(data, httpStatusOk) {
         attemptNumber += 1;
-        console.group(`[MyNotes biometrika] Pokušaj #${attemptNumber} — ${data.accepted ? "PRIHVAĆEN" : "ODBIJEN"}`);
-        console.log("HTTP status OK:", httpStatusOk);
-        console.log("Prompt:", promptItem.id, promptItem.text);
-        console.log("Prihvaćen:", data.accepted);
-        console.log("Sample ID:", data.sample_id);
-        console.log("Model rezultat:", data.model);
-        console.log("Fixed feature redoslijed:", (data.debug_stats || data.debug_stats_before_retrain || initialDebugStats).feature_names);
-        console.log("Fixed vector pokušaja:", data.fixed_vector);
-        console.log("Raw featurei pokušaja:", data.features);
-        console.log("Profil/statistika korisnika:", data.debug_stats || data.debug_stats_before_retrain || initialDebugStats);
-        if (data.retrain_result) console.log("Retrain nakon uspješnog pokušaja:", data.retrain_result);
-        if (data.new_prompt) console.log("Nova fraza nakon odbijanja:", data.new_prompt);
+        renderAttemptDebug(data);
+        console.groupCollapsed(`Fixed-text login pokušaj #${attemptNumber}`);
+        console.log("HTTP OK:", httpStatusOk);
+        console.log("Odgovor:", data);
         console.groupEnd();
     }
 
@@ -183,7 +270,7 @@
             if (!res.ok || !data.ok || !data.accepted) {
                 if (data.new_prompt) {
                     promptItem = data.new_prompt;
-                    resetTyping("Provjera nije prošla. Dodijeljena je nova fraza — prepiši je za novi pokušaj.");
+                    resetTyping("Provjera nije prošla. Development oblačić ispod prikazuje što je najviše odstupalo. Dodijeljena je nova fraza za novi pokušaj.");
                 } else {
                     setStatus("Provjera nije prošla: " + ((data.model && data.model.message) || data.error || "nepoznata greška"), "bad");
                     verifyBtn.disabled = false;
@@ -194,13 +281,18 @@
             setStatus("Provjera je prošla. Preusmjeravam na bilješke...", "good");
             window.location.href = data.redirect_url;
         } catch (err) {
-            console.error("[MyNotes biometrika] Greška kod verify requesta:", err);
             setStatus("Greška: server nije odgovorio. Provjeri je li Flask aplikacija pokrenuta.", "bad");
             verifyBtn.disabled = false;
         }
     }
 
+    typingBox.addEventListener("paste", blockPaste);
+    typingBox.addEventListener("drop", blockPaste);
     typingBox.addEventListener("keydown", (e) => {
+        if (isPasteShortcut(e)) {
+            blockPaste(e);
+            return;
+        }
         if (e.key === "Enter") {
             e.preventDefault();
             verifyCurrentSample();
@@ -213,6 +305,7 @@
     resetBtn.addEventListener("click", () => resetTyping());
     verifyBtn.addEventListener("click", verifyCurrentSample);
 
+    renderInitialDebugPanel();
     resetTyping();
 </script>
 {% endblock %}

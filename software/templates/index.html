@@ -1,63 +1,42 @@
 {% extends "base.html" %}
 {% block title %}Bilješke | {{ app_name }}{% endblock %}
 {% block content %}
-<section class="dashboard">
-    <div class="card welcome-card notes-hero">
+<section class="dashboard clean-dashboard">
+    <div class="card welcome-card notes-hero desktop-hero">
         <div>
             <p class="eyebrow">Dobrodošao/la, {{ username }}</p>
-            <h1>Moje privatne bilješke</h1>
-            <p class="lead">MyNotes je aplikacija za vođene bilješki. Dok pišeš, u pozadini se spremaju free-text uzorci dinamike tvog tipkanja za provjeru identiteta.</p>
-        </div>
-        <div class="actions hero-actions">
-            <a class="button" href="{{ url_for('note_new') }}">Nova bilješka</a>
-            <a class="button secondary" href="{{ url_for('samples') }}">Moji uzorci</a>
+            <h1>Moje bilješke</h1>
+            <p class="lead card-lead">Sve tvoje privatne bilješke na jednom su mjestu. Pregled je jednostavan, čist i fokusiran na sadržaj.</p>
         </div>
     </div>
 
-    <div class="stats-grid">
-        <div class="stat card"><span>Bilješke</span><strong>{{ note_count }}</strong></div>
-        <div class="stat card"><span>Enrollment</span><strong>{{ enrollment_count }}/{{ required_enrollment_samples }}</strong></div>
-        <div class="stat card"><span>Free-text uzorci</span><strong>{{ free_text_count }}</strong></div>
-    </div>
-
-    <div class="two-column">
-        <section class="card">
-            <div class="section-head">
-                <div>
-                    <p class="eyebrow">Radni prostor</p>
-                    <h2>Bilješke</h2>
-                </div>
-                <a class="button small" href="{{ url_for('note_new') }}">+ Dodaj</a>
+    <section class="card notes-panel">
+        <div class="section-head section-head-tight">
+            <div>
+                <p class="eyebrow">Radni prostor</p>
+                <h2>Tvoje bilješke</h2>
+                <p class="muted">Ukupno bilješki: {{ note_count }}</p>
             </div>
+            <a class="button small" href="{{ url_for('note_new') }}">+ Nova bilješka</a>
+        </div>
 
-            {% if notes %}
-                <div class="note-list">
-                    {% for note in notes %}
-                        <a class="note-item" href="{{ url_for('note_edit', note_id=note.id) }}">
-                            <strong>{{ note.title }}</strong>
-                            <span>{{ note.body[:140] if note.body else 'Prazna bilješka' }}{% if note.body|length > 140 %}...{% endif %}</span>
-                            <small>Zadnja izmjena: {{ note.updated_at.strftime('%Y-%m-%d %H:%M') }}</small>
-                        </a>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="empty-state compact-empty">
-                    <h2>Nemaš još bilješki</h2>
-                    <p class="muted">Kreiraj prvu bilješku i aplikacija će izgledati kao stvarni privatni notes sustav.</p>
-                    <a class="button" href="{{ url_for('note_new') }}">Napravi prvu bilješku</a>
-                </div>
-            {% endif %}
-        </section>
-
-        <aside class="card side-card">
-            <h2>Sigurnost tipkanjem</h2>
-            <p class="muted">Login koristi random frazu iz enrollmenta, a editor bilješki može spremati slobodni tekst kao <code>free_text_note</code> uzorke za kasniju analizu.</p>
-            <div class="prompt-list-preview">
-                {% for prompt in prompts %}
-                    <div><strong>{{ prompt.id }}</strong><span>{{ prompt.text }}</span></div>
+        {% if notes %}
+            <div class="note-list note-list-desktop">
+                {% for note in notes %}
+                    <a class="note-item" href="{{ url_for('note_edit', note_id=note.id) }}">
+                        <strong>{{ note.title }}</strong>
+                        <span>{{ note.body[:180] if note.body else 'Prazna bilješka' }}{% if note.body|length > 180 %}...{% endif %}</span>
+                        <small>Zadnja izmjena: {{ note.updated_at.strftime('%d.%m.%Y. %H:%M') }}</small>
+                    </a>
                 {% endfor %}
             </div>
-        </aside>
-    </div>
+        {% else %}
+            <div class="empty-state compact-empty clean-empty-state">
+                <h2>Nemaš još nijednu bilješku</h2>
+                <p class="muted">Započni s prvom bilješkom i izgradi svoj privatni radni prostor.</p>
+                <a class="button" href="{{ url_for('note_new') }}">Napravi prvu bilješku</a>
+            </div>
+        {% endif %}
+    </section>
 </section>
 {% endblock %}

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Research admin | {{ app_name }}{% endblock %}
+{% block title %}Administracija | {{ app_name }}{% endblock %}
 {% block content %}
 <section class="dashboard">
     <div class="card welcome-card">
         <p class="eyebrow">ML istraživanje</p>
-        <h1>Research admin dashboard</h1>
+        <h1>Administratorski pregled</h1>
         <p class="lead">Pregled korisnika, bilješki i uzoraka tipkanja za demonstraciju profesoru i izvoz podataka za model.</p>
         <div class="actions">
             <a class="button" href="{{ url_for('export_typing_samples_csv') }}">Preuzmi CSV svih uzoraka</a>
@@ -22,7 +22,7 @@
         <div class="section-head">
             <div>
                 <p class="eyebrow">Korisnici</p>
-                <h2>Enrollment i uzorci po korisniku</h2>
+                <h2>Registracijski i ostali uzorci po korisniku</h2>
             </div>
         </div>
         <div class="table-wrap">
@@ -32,9 +32,9 @@
                         <th>Korisnik</th>
                         <th>Rola</th>
                         <th>Bilješke</th>
-                        <th>Enrollment</th>
-                        <th>Login pokušaji</th>
-                        <th>Free-text</th>
+                        <th>Registracija</th>
+                        <th>Pokušaji prijave</th>
+                        <th>Aktivnosti pisanja</th>
                         <th>Ukupno</th>
                     </tr>
                 </thead>
@@ -61,7 +61,13 @@
             <h2>Tipovi uzoraka</h2>
             <div class="prompt-list-preview">
                 {% for sample_type, count in sample_types %}
-                    <div><strong>{{ count }}</strong><span>{{ sample_type }}</span></div>
+                    <div><strong>{{ count }}</strong><span>
+                        {% if sample_type in ['enroll', 'extra_enroll'] %}Učenje profila
+                        {% elif sample_type in ['verify_success', 'verify_attempt'] %}Provjera prijave
+                        {% elif sample_type == 'verify_failed' %}Neuspješna provjera
+                        {% elif sample_type.startswith('free_text') %}Provjera u bilješci
+                        {% else %}Ostali uzorci{% endif %}
+                    </span></div>
                 {% else %}
                     <p class="muted">Još nema uzoraka.</p>
                 {% endfor %}
@@ -74,8 +80,15 @@
             <div class="recent-list">
                 {% for sample in recent_samples %}
                     <div>
-                        <strong>#{{ sample.id }} · {{ sample.username }}</strong>
-                        <span>{{ sample.sample_type }} · {{ sample.prompt_id or '-' }} · {{ sample.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                        <strong>{{ sample.username }}</strong>
+                        <span>
+                            {% if sample.sample_type in ['enroll', 'extra_enroll'] %}Učenje profila
+                            {% elif sample.sample_type in ['verify_success', 'verify_attempt'] %}Provjera prijave
+                            {% elif sample.sample_type == 'verify_failed' %}Neuspješna provjera
+                            {% elif sample.sample_type.startswith('free_text') %}Provjera u bilješci
+                            {% else %}Uzorak tipkanja{% endif %}
+                            · {{ sample.created_at.strftime('%d.%m.%Y. %H:%M') }}
+                        </span>
                     </div>
                 {% else %}
                     <p class="muted">Još nema aktivnosti.</p>

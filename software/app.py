@@ -3,6 +3,7 @@ import io
 import json
 import os
 import random
+import secrets
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from functools import wraps
@@ -12,7 +13,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, inspect, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from ml.fixed_text_model import train_fixed_model, verify_fixed_typing
+from ml.fixed_text_model import FIXED_TEXT_ACCEPTANCE_MARGIN, train_fixed_model, verify_fixed_typing
 from ml.feature_extractor import (
     attach_fixed_text_features,
     extract_features as extract_raw_features,
@@ -51,13 +52,13 @@ PROMPT_BY_ID = {p["id"]: p["text"] for p in ENROLLMENT_PROMPTS}
 
 FEATURE_LABELS_HR = {
     "duration_ms": "Ukupno trajanje (ms)",
-    "keydown_count": "Broj keydown događaja",
-    "keyup_count": "Broj keyup događaja",
+    "keydown_count": "Broj pritisaka tipki",
+    "keyup_count": "Broj otpuštanja tipki",
     "char_count": "Broj znakova",
     "avg_dwell_ms": "Prosječno držanje tipke (ms)",
-    "avg_dd_interval_ms": "Prosječni razmak keydown-keydown (ms)",
-    "std_dwell_ms": "Std držanja tipke (ms)",
-    "std_dd_interval_ms": "Std razmaka keydown-keydown (ms)",
+    "avg_dd_interval_ms": "Prosječni razmak između pritisaka (ms)",
+    "std_dwell_ms": "Standardna devijacija držanja tipke (ms)",
+    "std_dd_interval_ms": "Standardna devijacija razmaka između pritisaka (ms)",
     "typing_speed_chars_per_sec": "Brzina tipkanja (znakova/s)",
     "pause_ratio": "Udio dužih pauza",
 }
@@ -147,6 +148,13 @@ def seed_admin_user():
         admin.role = "admin"
     db.session.commit()
 
+
+def redirect_authenticated_user():
+    if session.get("role") == "admin":
+        return redirect(url_for("admin_dashboard"))
+    return redirect(url_for("index"))
+
+
 def login_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
@@ -165,7 +173,7 @@ def admin_required(view_func):
             flash("Prvo se prijavite.", "warning")
             return redirect(url_for("login"))
         if session.get("role") != "admin":
-            flash("Ova stranica je dostupna samo research adminu.", "danger")
+            flash("Ova stranica je dostupna samo administratoru.", "danger")
             return redirect(url_for("index"))
         return view_func(*args, **kwargs)
 
@@ -175,6 +183,8 @@ def admin_required(view_func):
 def pending_registration_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
+        if session.get("user_id"):
+            return redirect_authenticated_user()
         if not session.get("pending_registration_user_id"):
             flash("Prvo unesite podatke za registraciju.", "warning")
             return redirect(url_for("register"))
@@ -186,6 +196,8 @@ def pending_registration_required(view_func):
 def pending_login_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
+        if session.get("user_id"):
+            return redirect_authenticated_user()
         if not session.get("pending_login_user_id"):
             flash("Prvo unesite korisničko ime i lozinku.", "warning")
             return redirect(url_for("login"))
@@ -202,6 +214,13 @@ def current_sample_count():
 
 def enrollment_count_for_user(user_id):
     return TypingSample.query.filter_by(user_id=user_id, sample_type="enroll").count()
+
+
+def free_text_sample_count_for_user(user_id):
+    return TypingSample.query.filter(
+        TypingSample.user_id == user_id,
+        TypingSample.sample_type.like("free_text%")
+    ).count()
 
 
 def note_count_for_user(user_id):
@@ -286,9 +305,9 @@ def summarize_fixed_text_profile(user_id):
             "type": "One-Class SVM",
             "kernel": "rbf",
             "gamma": "scale",
-            "nu": 0.15,
-            "accepted_when": "prediction == 1, odnosno decision_function score >= 0",
-            "note": "nu=0.15 je okvirna tolerancija: model smije tretirati dio trening uzoraka kao rubne/outlier uzorke, ali nije stroga postotna granica za svaki login.",
+            "nu": 0.05,
+            "accepted_when": f"prediction == 1 ili decision_function score >= {FIXED_TEXT_ACCEPTANCE_MARGIN}",
+            "note": "Development tolerancija: nu=0.05, uz dodatnu marginu scorea za rubne korisničke pokušaje.",
             "fixed_text_filter": "Model koristi fixed_text_features: završne znakove fraze bez Backspace/Delete/navigation/modifier tipki i bez obrisanih znakova. Raw events_json i dalje čuva sve za free-text ML.",
         },
         "overall_summary": summarize_vectors(vectors),
@@ -296,13 +315,99 @@ def summarize_fixed_text_profile(user_id):
     }
 
 
+FIXED_FEATURE_LABELS = {
+    "avg_dwell_ms": "Vrijeme držanja tipke",
+    "avg_dd_interval_ms": "Razmak između pritisaka",
+    "std_dwell_ms": "Standardna devijacija držanja tipke",
+    "std_dd_interval_ms": "Standardna devijacija razmaka",
+    "typing_speed_chars_per_sec": "Brzina tipkanja",
+    "pause_ratio": "Udio dužih pauza",
+}
+
+
+def explain_fixed_attempt(features, model_result, profile_summary):
+    """Razumljiv development prikaz usporedbe trenutnog pokušaja s profilom korisnika."""
+    feature_names = profile_summary.get("feature_names", [])
+    vector = features_to_vector_fixed(features)
+    overall = profile_summary.get("overall_summary", {})
+    rows = []
+
+    for index, name in enumerate(feature_names):
+        value = float(vector[index]) if index < len(vector) else 0.0
+        stats = overall.get(name, {})
+        avg = stats.get("avg")
+        std = stats.get("std")
+        diff = None
+        z_score = None
+        status = "info"
+        verdict = "Nema dovoljno podataka"
+
+        if isinstance(avg, (int, float)):
+            diff = round(value - float(avg), 3)
+            if isinstance(std, (int, float)) and float(std) > 0.001:
+                z_score = round(abs(diff) / float(std), 2)
+                if z_score <= 1.25:
+                    status = "good"
+                    verdict = "Dobro se podudara"
+                elif z_score <= 2.5:
+                    status = "warn"
+                    verdict = "Rubno odstupanje"
+                else:
+                    status = "bad"
+                    verdict = "Veće odstupanje"
+            else:
+                # Ako je trening bio gotovo identičan, standardna devijacija može biti 0.
+                tolerance = max(abs(float(avg)) * 0.20, 5.0 if name.endswith("_ms") else 0.05)
+                if abs(diff) <= tolerance:
+                    status = "good"
+                    verdict = "Dobro se podudara"
+                else:
+                    status = "bad"
+                    verdict = "Veće odstupanje"
+
+        rows.append({
+            "name": name,
+            "label": FIXED_FEATURE_LABELS.get(name, name),
+            "attempt_value": round(value, 3),
+            "profile_avg": round(float(avg), 3) if isinstance(avg, (int, float)) else None,
+            "profile_std": round(float(std), 3) if isinstance(std, (int, float)) else None,
+            "difference": diff,
+            "z_score": z_score,
+            "status": status,
+            "verdict": verdict,
+        })
+
+    sorted_rows = sorted(rows, key=lambda row: {"bad": 0, "warn": 1, "info": 2, "good": 3}.get(row["status"], 4))
+    failed = [row for row in sorted_rows if row["status"] == "bad"]
+    warnings = [row for row in sorted_rows if row["status"] == "warn"]
+
+    if model_result.get("accepted"):
+        summary = "Model je prihvatio pokušaj. Većina mjera ritma dovoljno odgovara profilu."
+    elif failed:
+        summary = "Model nije prihvatio pokušaj. Najviše odskaču: " + ", ".join(row["label"] for row in failed[:3]) + "."
+    elif warnings:
+        summary = "Model nije prihvatio pokušaj, ali odstupanja su uglavnom rubna. Pokušaj prepisati frazu normalnim tempom."
+    else:
+        summary = "Model nije prihvatio pokušaj. Provjeri score i broj trening uzoraka."
+
+    return {
+        "summary": summary,
+        "score": model_result.get("score"),
+        "accepted": bool(model_result.get("accepted")),
+        "training_sample_count": profile_summary.get("training_sample_count", 0),
+        "enrollment_sample_count": profile_summary.get("enrollment_sample_count", 0),
+        "successful_verify_sample_count": profile_summary.get("successful_verify_sample_count", 0),
+        "failed_verify_sample_count": profile_summary.get("failed_verify_sample_count", 0),
+        "acceptance_margin": FIXED_TEXT_ACCEPTANCE_MARGIN,
+        "rows": rows,
+        "top_differences": sorted_rows[:3],
+    }
+
+
 def summarize_enrollment_progress(user_id):
     samples = TypingSample.query.filter_by(user_id=user_id, sample_type="enroll").order_by(TypingSample.created_at.asc()).all()
+    # Isti skup značajki koji fixed-text model dobiva kroz features_to_vector_fixed.
     feature_names = [
-        "duration_ms",
-        "keydown_count",
-        "keyup_count",
-        "char_count",
         "avg_dwell_ms",
         "avg_dd_interval_ms",
         "std_dwell_ms",
@@ -333,7 +438,7 @@ def summarize_enrollment_progress(user_id):
         "sample_count": len(samples),
         "required_samples": REQUIRED_ENROLLMENT_SAMPLES,
         "feature_names": feature_names,
-        "fixed_text_filter_note": "Enrollment statistika prikazuje očišćene fixed-text značajke. Backspace, Delete, navigacijske i modifier tipke ostaju u raw podacima, ali se ne koriste za fixed-text model.",
+        "fixed_text_filter_note": "Statistika prikazuje očišćene fixed-text značajke koje se koriste za treniranje i provjeru fixed-text modela.",
         "ignored_for_fixed_text_now": ["backspace_count", "Backspace", "Delete", "navigacijske tipke", "modifier tipke"],
         "overall_summary": overall,
         "per_prompt_counts": per_prompt,
@@ -341,10 +446,13 @@ def summarize_enrollment_progress(user_id):
 
 
 def summarize_free_text_readiness(user_id):
-    samples = TypingSample.query.filter_by(user_id=user_id, sample_type="free_text_note").order_by(TypingSample.created_at.desc()).limit(20).all()
+    samples = TypingSample.query.filter(
+        TypingSample.user_id == user_id,
+        TypingSample.sample_type.like("free_text%")
+    ).order_by(TypingSample.created_at.desc()).limit(20).all()
     return {
-        "sample_type": "free_text_note",
-        "sample_count": TypingSample.query.filter_by(user_id=user_id, sample_type="free_text_note").count(),
+        "sample_type": "free_text",
+        "sample_count": free_text_sample_count_for_user(user_id),
         "stored_fields": ["typed_text", "events_json", "features_json", "created_at", "user_id"],
         "features_include": [
             "duration_ms", "keydown_count", "keyup_count", "char_count", "backspace_count",
@@ -452,6 +560,7 @@ def ensure_fixed_text_features_for_existing_samples():
 def create_app():
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-change-me")
+    app.config["APP_SESSION_TOKEN"] = secrets.token_hex(32)
 
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     instance_dir = os.path.join(project_root, "instance")
@@ -470,12 +579,35 @@ def create_app():
         seed_admin_user()
         ensure_fixed_text_features_for_existing_samples()
 
+    def session_has_identity():
+        return any(
+            session.get(key)
+            for key in ("user_id", "pending_registration_user_id", "pending_login_user_id")
+        )
+
+    @app.before_request
+    def invalidate_sessions_from_previous_run():
+        if session_has_identity() and session.get("_app_session_token") != app.config["APP_SESSION_TOKEN"]:
+            session.clear()
+
+    @app.after_request
+    def mark_current_session(response):
+        if session_has_identity():
+            session["_app_session_token"] = app.config["APP_SESSION_TOKEN"]
+        return response
+
     @app.context_processor
     def inject_globals():
+        pending_registration = bool(session.get("pending_registration_user_id"))
+        pending_login = bool(session.get("pending_login_user_id"))
         return {
             "app_name": APP_NAME,
             "logged_in_username": session.get("username"),
             "logged_in_role": session.get("role"),
+            "pending_registration": pending_registration,
+            "pending_registration_username": session.get("pending_registration_username"),
+            "pending_login": pending_login,
+            "pending_login_username": session.get("pending_login_username"),
             "nav_sample_count": current_sample_count(),
         }
 
@@ -487,7 +619,7 @@ def create_app():
         notes = Note.query.filter_by(user_id=user_id).order_by(Note.updated_at.desc()).all()
         sample_count = current_sample_count()
         enrollment_count = enrollment_count_for_user(user_id)
-        free_text_count = TypingSample.query.filter_by(user_id=user_id, sample_type="free_text_note").count()
+        free_text_count = free_text_sample_count_for_user(user_id)
         return render_template(
             "index.html",
             username=session["username"],
@@ -502,6 +634,13 @@ def create_app():
 
     @app.route("/register", methods=["GET", "POST"])
     def register():
+        if session.get("user_id"):
+            return redirect_authenticated_user()
+        if session.get("pending_registration_user_id"):
+            return redirect(url_for("register_enroll"))
+        if session.get("pending_login_user_id"):
+            return redirect(url_for("login_verify"))
+
         if request.method == "POST":
             username = request.form.get("username", "").strip().lower()
             password = request.form.get("password", "")
@@ -531,7 +670,6 @@ def create_app():
             session.clear()
             session["pending_registration_user_id"] = user.id
             session["pending_registration_username"] = user.username
-            flash("Podaci su spremljeni. Registracija završava tek nakon 20 uzoraka tipkanja.", "info")
             return redirect(url_for("register_enroll"))
 
         return render_template("register.html", username_value="", required_samples=REQUIRED_ENROLLMENT_SAMPLES)
@@ -628,6 +766,13 @@ def create_app():
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
+        if session.get("user_id"):
+            return redirect_authenticated_user()
+        if session.get("pending_registration_user_id"):
+            return redirect(url_for("register_enroll"))
+        if session.get("pending_login_user_id"):
+            return redirect(url_for("login_verify"))
+
         if request.method == "POST":
             username = request.form.get("username", "").strip().lower()
             password = request.form.get("password", "")
@@ -642,13 +787,13 @@ def create_app():
                     session["user_id"] = user.id
                     session["username"] = user.username
                     session["role"] = user.role
-                    flash("Prijavljeni ste kao research admin.", "success")
+                    flash("Prijavljeni ste kao administrator.", "success")
                     return redirect(url_for("admin_dashboard"))
 
                 if not user.enrollment_complete or enrollment_count_for_user(user.id) < REQUIRED_ENROLLMENT_SAMPLES:
                     session["pending_registration_user_id"] = user.id
                     session["pending_registration_username"] = user.username
-                    flash("Račun postoji, ali enrollment nije dovršen. Dovršite 20 uzoraka prije prijave.", "warning")
+                    flash("Račun postoji, ali registracija još nije dovršena. Dovršite svih 20 uzoraka prije prijave.", "warning")
                     return redirect(url_for("register_enroll"))
 
                 session["pending_login_user_id"] = user.id
@@ -700,6 +845,7 @@ def create_app():
         model_result = verify_fixed_typing(user.id, features)
         attempt_vector = features_to_vector_fixed(features)
         debug_stats = summarize_fixed_text_profile(user.id)
+        debug_explanation = explain_fixed_attempt(features, model_result, debug_stats)
 
         if model_result["accepted"]:
             sample.sample_type = "verify_success"
@@ -723,6 +869,7 @@ def create_app():
                 "model": model_result,
                 "retrain_result": retrain_result,
                 "debug_stats_before_retrain": debug_stats,
+                "debug_explanation": debug_explanation,
             })
 
         sample.sample_type = "verify_failed"
@@ -738,6 +885,7 @@ def create_app():
             "fixed_vector": attempt_vector,
             "model": model_result,
             "debug_stats": summarize_fixed_text_profile(user.id),
+            "debug_explanation": debug_explanation,
             "new_prompt": next_prompt,
             "message": "Provjera nije prošla. Dodijeljena je nova random fraza.",
         }), 403
@@ -745,7 +893,6 @@ def create_app():
     @app.get("/logout")
     def logout():
         session.clear()
-        flash("Odjavljeni ste.", "info")
         return redirect(url_for("login"))
 
     @app.route("/notes/new", methods=["GET", "POST"])
@@ -759,7 +906,12 @@ def create_app():
             db.session.commit()
             flash("Bilješka je spremljena.", "success")
             return redirect(url_for("note_edit", note_id=note.id))
-        return render_template("note_edit.html", note=None, free_text_readiness=summarize_free_text_readiness(session.get("user_id", 0)) if session.get("user_id") else None)
+        return render_template(
+            "note_edit.html",
+            note=None,
+            free_text_readiness=summarize_free_text_readiness(session.get("user_id", 0)) if session.get("user_id") else None,
+            suspicious_count=session.get("free_text_suspicious_count", 0),
+        )
 
     @app.route("/notes/<int:note_id>", methods=["GET", "POST"])
     @login_required
@@ -772,7 +924,12 @@ def create_app():
             db.session.commit()
             flash("Bilješka je spremljena.", "success")
             return redirect(url_for("note_edit", note_id=note.id))
-        return render_template("note_edit.html", note=note, free_text_readiness=summarize_free_text_readiness(session["user_id"]))
+        return render_template(
+            "note_edit.html",
+            note=note,
+            free_text_readiness=summarize_free_text_readiness(session["user_id"]),
+            suspicious_count=session.get("free_text_suspicious_count", 0),
+        )
 
     @app.post("/notes/<int:note_id>/delete")
     @login_required
@@ -876,7 +1033,8 @@ def create_app():
                 "train_result": train_result,
                 "suspicious_count": 0,
                 "logout_required": False,
-                "message": "Free-text enrollment uzorak je spremljen."
+                "free_text_readiness": summarize_free_text_readiness(user.id),
+                "message": "Spremljen je uzorak pisanja bilješke."
             })
 
         # 2) AKO MODEL JOŠ NIJE NASTAO, pokušaj ga istrenirati
@@ -903,6 +1061,7 @@ def create_app():
                     "train_result": train_result,
                     "suspicious_count": 0,
                     "logout_required": False,
+                    "free_text_readiness": summarize_free_text_readiness(user.id),
                     "message": "Model još nije spreman za provjeru."
                 })
 
@@ -935,7 +1094,7 @@ def create_app():
         elif verify_result["accepted"] is False:
             suspicious_count += 1
 
-            if suspicious_count >= 2:
+            if suspicious_count >= 3:
                 sample.sample_type = "free_text_logout_triggered"
                 logout_required = True
             else:
@@ -953,6 +1112,7 @@ def create_app():
             "verify_result": verify_result,
             "suspicious_count": suspicious_count,
             "logout_required": logout_required,
+            "free_text_readiness": summarize_free_text_readiness(user.id),
             "message": verify_result.get("message")
         }
 
@@ -991,10 +1151,33 @@ def create_app():
             .limit(50)
             .all()
         )
+
+        label_map = {
+            "enroll": ("Registracijski uzorak", "Spremljeno"),
+            "extra_enroll": ("Dodatni uzorak", "Spremljeno"),
+            "verify_success": ("Prijava", "Uspješno"),
+            "verify_attempt": ("Prijava", "Pokušaj"),
+            "verify_failed": ("Prijava", "Neuspješno"),
+            "free_text_enroll": ("Pisanje bilješke", "Spremljeno"),
+            "free_text_check": ("Pisanje bilješke", "Provjereno"),
+            "free_text_verified": ("Pisanje bilješke", "Potvrđeno"),
+            "free_text_suspicious": ("Pisanje bilješke", "Sumnjivo"),
+            "free_text_logout_triggered": ("Pisanje bilješke", "Odjavljeno"),
+        }
+
         rows = []
         for s in recent_samples:
             features = json.loads(s.features_json)
-            rows.append({"sample": s, "features": features})
+            label, result = label_map.get(s.sample_type, ("Aktivnost tipkanja", "Spremljeno"))
+            duration = features.get("duration_ms")
+            speed = features.get("typing_speed_chars_per_sec")
+            rows.append({
+                "sample": s,
+                "label": label,
+                "result": result,
+                "duration": f"{duration:.0f} ms" if isinstance(duration, (int, float)) else "-",
+                "speed": f"{speed:.2f} zn./s" if isinstance(speed, (int, float)) else "-",
+            })
         return render_template("samples.html", rows=rows)
 
     @app.get("/admin")
@@ -1011,7 +1194,7 @@ def create_app():
                     TypingSample.user_id == u.id,
                     TypingSample.sample_type.in_(["verify_success", "verify_failed", "verify_attempt"])
                 ).count(),
-                "free_text": TypingSample.query.filter_by(user_id=u.id, sample_type="free_text_note").count(),
+                "free_text": free_text_sample_count_for_user(u.id),
                 "total": TypingSample.query.filter_by(user_id=u.id).count(),
             })
         sample_types = db.session.query(TypingSample.sample_type, func.count(TypingSample.id)).group_by(TypingSample.sample_type).all()
