@@ -213,7 +213,7 @@
 
         devCompareBody.innerHTML = (explanation.rows || []).map(row => {
             const cls = statusClass(row.status);
-            const z = row.z_score === null || row.z_score === undefined ? "" : ` · z=${formatNumber(row.z_score)}`;
+            const z = row.z_score === null || row.z_score === undefined ? "" : ` - z=${formatNumber(row.z_score)}`;
             return `<tr class="${cls}">
                 <td>${row.label}</td>
                 <td>${formatNumber(row.attempt_value)}</td>

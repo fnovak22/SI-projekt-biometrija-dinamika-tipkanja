@@ -242,6 +242,115 @@ def _std(values):
     return round(variance ** 0.5, 3)
 
 
+def _coerce_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+ADMIN_DYNAMICS_METRICS = [
+    {
+        "key": "avg_dwell_ms",
+        "title": "Vrijeme držanja tipke",
+        "subtitle": "Prosjek koliko dugo korisnik drži tipku pritisnutom.",
+        "unit": "ms",
+        "precision": 1,
+    },
+    {
+        "key": "avg_dd_interval_ms",
+        "title": "Razmak između pritisaka",
+        "subtitle": "Prosječno vrijeme između dva uzastopna pritiska tipki.",
+        "unit": "ms",
+        "precision": 1,
+    },
+    {
+        "key": "typing_speed_chars_per_sec",
+        "title": "Brzina tipkanja",
+        "subtitle": "Prosječna brzina tipkanja mjerena u znakovima po sekundi.",
+        "unit": "zn./s",
+        "precision": 2,
+    },
+]
+
+TRUSTED_DYNAMICS_SAMPLE_TYPES = {
+    "enroll",
+    "extra_enroll",
+    "verify_success",
+    "free_text_enroll",
+    "free_text_verified",
+    "free_text_check",
+}
+
+
+def format_metric_value(value, unit, precision):
+    if value is None:
+        return "—"
+    return f"{float(value):.{precision}f} {unit}"
+
+
+def build_admin_typing_distribution_charts(users):
+    metric_buckets = {
+        user.username: {metric["key"]: [] for metric in ADMIN_DYNAMICS_METRICS}
+        for user in users
+    }
+
+    samples = TypingSample.query.filter(
+        TypingSample.sample_type.in_(sorted(TRUSTED_DYNAMICS_SAMPLE_TYPES))
+    ).all()
+
+    for sample in samples:
+        try:
+            features = json.loads(sample.features_json or "{}")
+        except json.JSONDecodeError:
+            features = {}
+
+        user_bucket = metric_buckets.setdefault(
+            sample.username,
+            {metric["key"]: [] for metric in ADMIN_DYNAMICS_METRICS}
+        )
+
+        for metric in ADMIN_DYNAMICS_METRICS:
+            value = _coerce_float(features.get(metric["key"]))
+            if value is not None:
+                user_bucket[metric["key"]].append(value)
+
+    charts = []
+    for metric in ADMIN_DYNAMICS_METRICS:
+        items = []
+        for user in users:
+            values = metric_buckets.get(user.username, {}).get(metric["key"], [])
+            if not values:
+                continue
+
+            avg_value = sum(values) / len(values)
+            rounded_value = round(avg_value, metric["precision"])
+            items.append({
+                "label": user.username,
+                "raw_value": avg_value,
+                "value_display": format_metric_value(rounded_value, metric["unit"], metric["precision"]),
+                "sample_count": len(values),
+            })
+
+        items.sort(key=lambda item: item["raw_value"], reverse=True)
+        max_value = max((item["raw_value"] for item in items), default=0)
+        for item in items:
+            if max_value > 0:
+                item["height_pct"] = max(14, int(round((item["raw_value"] / max_value) * 100)))
+            else:
+                item["height_pct"] = 0
+
+        charts.append({
+            "key": metric["key"],
+            "title": metric["title"],
+            "subtitle": metric["subtitle"],
+            "unit": metric["unit"],
+            "items": items,
+        })
+
+    return charts
+
+
 def summarize_fixed_text_profile(user_id):
     """Vraća sažetak profila za debug u browser console.
 
@@ -627,13 +736,13 @@ def summarize_free_text_profile(user_id, current_features=None, verify_result=No
                 z_score = abs(diff) / float(profile_std)
                 if z_score <= 1.25:
                     level = "good"
-                    assessment = f"Dobro se podudara · z={z_score:.2f}"
+                    assessment = f"Dobro se podudara: z={z_score:.2f}"
                 elif z_score <= 2.5:
                     level = "warn"
-                    assessment = f"Rubno odstupanje · z={z_score:.2f}"
+                    assessment = f"Rubno odstupanje: z={z_score:.2f}"
                 else:
                     level = "bad"
-                    assessment = f"Veće odstupanje · z={z_score:.2f}"
+                    assessment = f"Veće odstupanje: z={z_score:.2f}"
             else:
                 if abs(diff) < 0.001:
                     level = "good"
@@ -1452,20 +1561,18 @@ def create_app():
             user_rows.append({
                 "user": u,
                 "notes": note_count_for_user(u.id),
-                "enroll": enrollment_count_for_user(u.id),
-                "verify": TypingSample.query.filter(
-                    TypingSample.user_id == u.id,
-                    TypingSample.sample_type.in_(["verify_success", "verify_failed", "verify_attempt"])
-                ).count(),
-                "free_text": free_text_sample_count_for_user(u.id),
-                "total": TypingSample.query.filter_by(user_id=u.id).count(),
+                "login_success": TypingSample.query.filter_by(user_id=u.id, sample_type="verify_success").count(),
+                "login_failed": TypingSample.query.filter_by(user_id=u.id, sample_type="verify_failed").count(),
+                "free_text_logouts": TypingSample.query.filter_by(user_id=u.id, sample_type="free_text_logout_triggered").count(),
             })
         sample_types = db.session.query(TypingSample.sample_type, func.count(TypingSample.id)).group_by(TypingSample.sample_type).all()
+        typing_distribution_charts = build_admin_typing_distribution_charts(users)
         recent_samples = TypingSample.query.order_by(TypingSample.created_at.desc()).limit(30).all()
         return render_template(
             "admin.html",
             user_rows=user_rows,
             sample_types=sample_types,
+            typing_distribution_charts=typing_distribution_charts,
             recent_samples=recent_samples,
             total_users=User.query.count(),
             total_notes=Note.query.count(),
@@ -1545,4 +1652,5 @@ def create_app():
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # app.run(debug=True)  # Lokalni debug način; vrati ovu liniju ako trebaš debug samo na svom računalu.
+    app.run(host="0.0.0.0", port=5000, debug=False)

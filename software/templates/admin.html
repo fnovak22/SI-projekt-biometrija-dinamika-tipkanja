@@ -30,12 +30,11 @@
                 <thead>
                     <tr>
                         <th>Korisnik</th>
-                        <th>Rola</th>
+                        <th>Uloga</th>
                         <th>Bilješke</th>
-                        <th>Registracija</th>
-                        <th>Pokušaji prijave</th>
-                        <th>Aktivnosti pisanja</th>
-                        <th>Ukupno</th>
+                        <th>Uspješne prijave</th>
+                        <th>Neuspješne prijave</th>
+                        <th>Broj Free-Text odjava</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -44,10 +43,9 @@
                             <td>{{ row.user.username }}</td>
                             <td><span class="sample-chip">{{ row.user.role }}</span></td>
                             <td>{{ row.notes }}</td>
-                            <td>{{ row.enroll }}/20</td>
-                            <td>{{ row.verify }}</td>
-                            <td>{{ row.free_text }}</td>
-                            <td>{{ row.total }}</td>
+                            <td>{{ row.login_success }}</td>
+                            <td>{{ row.login_failed }}</td>
+                            <td>{{ row.free_text_logouts }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -55,46 +53,62 @@
         </div>
     </section>
 
-    <div class="two-column">
-        <section class="card">
-            <p class="eyebrow">Distribucija</p>
-            <h2>Tipovi uzoraka</h2>
-            <div class="prompt-list-preview">
-                {% for sample_type, count in sample_types %}
-                    <div><strong>{{ count }}</strong><span>
-                        {% if sample_type in ['enroll', 'extra_enroll'] %}Učenje profila
-                        {% elif sample_type in ['verify_success', 'verify_attempt'] %}Provjera prijave
-                        {% elif sample_type == 'verify_failed' %}Neuspješna provjera
-                        {% elif sample_type.startswith('free_text') %}Provjera u bilješci
-                        {% else %}Ostali uzorci{% endif %}
-                    </span></div>
-                {% else %}
-                    <p class="muted">Još nema uzoraka.</p>
-                {% endfor %}
+    <section class="card">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Analitika tipkanja</p>
+                <h2>Distribucija dinamike tipkanja po korisniku</h2>
+                <p class="small-lead muted">Tri intuitivna pokazatelja prikazuju prosječne vrijednosti po korisniku na temelju legitimnih uzoraka tipkanja.</p>
             </div>
-        </section>
-
-        <section class="card">
-            <p class="eyebrow">Zadnje aktivnosti</p>
-            <h2>Zadnjih 30 uzoraka</h2>
-            <div class="recent-list">
-                {% for sample in recent_samples %}
-                    <div>
-                        <strong>{{ sample.username }}</strong>
-                        <span>
-                            {% if sample.sample_type in ['enroll', 'extra_enroll'] %}Učenje profila
-                            {% elif sample.sample_type in ['verify_success', 'verify_attempt'] %}Provjera prijave
-                            {% elif sample.sample_type == 'verify_failed' %}Neuspješna provjera
-                            {% elif sample.sample_type.startswith('free_text') %}Provjera u bilješci
-                            {% else %}Uzorak tipkanja{% endif %}
-                            · {{ sample.created_at.strftime('%d.%m.%Y. %H:%M') }}
-                        </span>
+        </div>
+        <div class="typing-charts-grid">
+            {% for chart in typing_distribution_charts %}
+                <div class="mini-chart-card">
+                    <div class="mini-chart-head">
+                        <h3>{{ chart["title"] }}</h3>
+                        <p>{{ chart["subtitle"] }}</p>
                     </div>
-                {% else %}
-                    <p class="muted">Još nema aktivnosti.</p>
-                {% endfor %}
-            </div>
-        </section>
-    </div>
+                    {% if chart["items"] %}
+                        <div class="bar-chart">
+                            {% for item in chart["items"] %}
+                                <div class="bar-column" title="{{ item.label }} - {{ item.value_display }} - {{ item.sample_count }} uzoraka">
+                                    <span class="bar-value">{{ item.value_display }}</span>
+                                    <div class="bar-track">
+                                        <div class="bar-fill" style="height: {{ item.height_pct }}%;"></div>
+                                    </div>
+                                    <span class="bar-label">{{ item.label }}</span>
+                                </div>
+                            {% endfor %}
+                        </div>
+                        <p class="chart-note">Prikaz predstavlja prosjek po korisniku i služi za brzi vizualni uvid u razlike u dinamici tipkanja.</p>
+                    {% else %}
+                        <p class="muted">Još nema dovoljno podataka za prikaz ovog dijagrama.</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <p class="eyebrow">Zadnje aktivnosti</p>
+        <h2>Zadnjih 30 uzoraka</h2>
+        <div class="recent-list">
+            {% for sample in recent_samples %}
+                <div>
+                    <strong>{{ sample.username }}</strong>
+                    <span>
+                        {% if sample.sample_type in ['enroll', 'extra_enroll'] %}Učenje profila
+                        {% elif sample.sample_type in ['verify_success', 'verify_attempt'] %}Provjera prijave
+                        {% elif sample.sample_type == 'verify_failed' %}Neuspješna provjera
+                        {% elif sample.sample_type.startswith('free_text') %}Provjera u bilješci
+                        {% else %}Uzorak tipkanja{% endif %}
+                        - {{ sample.created_at.strftime('%d.%m.%Y. %H:%M') }}
+                    </span>
+                </div>
+            {% else %}
+                <p class="muted">Još nema aktivnosti.</p>
+            {% endfor %}
+        </div>
+    </section>
 </section>
 {% endblock %}
