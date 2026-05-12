@@ -5,7 +5,7 @@
     <div class="card collect-card">
         <p class="eyebrow">2. korak registracije za {{ username }}</p>
         <h1>Prepiši prikazane fraze za završetak registracije</h1>
-        <p class="muted">Piši normalnim tempom, bez kopiranja teksta. Ako pogriješiš, krivo mjesto bit će označeno crveno. Tipka Enter sprema uzorak kada je tekst točan.</p>
+        <p class="muted">Piši normalnim tempom, bez kopiranja teksta. Ako pogriješiš, krivo mjesto bit će označeno crveno.</p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -42,7 +42,6 @@
             <div class="section-head compact-head">
                 <div>
                     <h2>Statistika tvojeg tipkanja</h2>
-                    <p class="muted">Ažurira se nakon svakog spremljenog uzorka. Tablica prikazuje glavne mjere koje koristi model za fiksne fraze.</p>
                 </div>
             </div>
             <div class="stats-table-wrap">
